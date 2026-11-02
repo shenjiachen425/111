@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>拾光智能体 · 员工问答</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8; display: flex; flex-direction: column; height: 100vh;
+  }
+  #chat { flex: 1; overflow-y: auto; padding: 16px; max-width: 760px; margin: 0 auto; width: 100%; }
+  .bubble { margin: 10px 0; display: flex; }
+  .bubble.user { justify-content: flex-end; }
+  .bubble.bot { justify-content: flex-start; }
+  .bubble .content {
+    max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .bubble.user .content { background: #4f7cff; color: #fff; border-bottom-right-radius: 4px; }
+  .bubble.bot .content { background: #fff; color: #222; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
+  .status { color: #888; font-size: 13px; padding: 4px 0; }
+  .status::after { content: "●"; animation: blink 1s infinite; margin-left: 4px; }
+  @keyframes blink { 0%,100% { opacity: .2; } 50% { opacity: 1; } }
+  .sources { margin-top: 8px; font-size: 13px; }
+  .sources details { background: #f3f4f6; border-radius: 8px; padding: 6px 10px; margin-top: 4px; }
+  .sources summary { cursor: pointer; color: #4f7cff; }
+  .sources .snippet { color: #555; margin-top: 4px; white-space: pre-wrap; }
+  #error {
+    display: none; background: #fde8e8; color: #c0392b; padding: 10px 16px;
+    font-size: 14px; text-align: center;
+  }
+  .inputbar {
+    display: flex; gap: 8px; padding: 12px; background: #fff; border-top: 1px solid #e5e7eb;
+    max-width: 760px; margin: 0 auto; width: 100%;
+  }
+  .inputbar input {
+    flex: 1; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 10px; outline: none; font-size: 15px;
+  }
+  .inputbar button {
+    padding: 0 20px; border: none; border-radius: 10px; background: #4f7cff; color: #fff;
+    cursor: pointer; font-size: 15px;
+  }
+  .inputbar button:disabled { opacity: .5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <div id="chat"></div>
+  <div id="error"></div>
+  <div class="inputbar">
+    <input id="q" placeholder="输入你的问题，如：单笔8000元需要谁审批？" autocomplete="off" />
+    <button id="send">发送</button>
+  </div>
+
+<script>
+// ============ 会话ID：前端生成并本地保存（接口设计§8 默认策略）============
+const SESSION_KEY = "shiguang_session_id";
+let sessionId = localStorage.getItem(SESSION_KEY);
+if (!sessionId) { sessionId = crypto.randomUUID(); localStorage.setItem(SESSION_KEY, sessionId); }
+
+const chatEl = document.getElementById("chat");
+const errorEl = document.getElementById("error");
+const inputEl = document.getElementById("q");
+const sendBtn = document.getElementById("send");
+
+function showError(msg) { errorEl.textContent = msg; errorEl.style.display = "block"; }
+function hideError() { errorEl.style.display = "none"; }
+
+// 新增一个对话气泡，返回该气泡的 .content 容器
+function addBubble(role) {
+  const wrap = document.createElement("div");
+  wrap.className = "bubble " + role;
+  const content = document.createElement("div");
+  content.className = "content";
+  wrap.appendChild(content);
+  chatEl.appendChild(wrap);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return wrap;
+}
+
+// 把引用来源渲染到回答气泡底部
+function renderSources(box, sources) {
+  if (!sources || !sources.length) { box.textContent = "（无引用来源）"; return; }
+  box.innerHTML = "";
+  sources.forEach(s => {
+    const d = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = `📄 ${s.file} · 【${s.section}】`;
+    const snip = document.createElement("div");
+    snip.className = "snippet";
+    snip.textContent = s.snippet;
+    d.appendChild(sum); d.appendChild(snip);
+    box.appendChild(d);
+  });
+}
+
+// 解析一个 SSE 原始帧 -> {event, data(JSON)}
+function parseEvent(raw) {
+  let event = "message", data = "";
+  raw.split("\n").forEach(line => {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  });
+  try { return { event, data: JSON.parse(data) }; } catch (e) { return null; }
+}
+
+async function send() {
+  const question = inputEl.value.trim();
+  if (!question) return;
+  inputEl.value = "";
+  hideError();
+  sendBtn.disabled = true;
+
+  // 用户气泡
+  addBubble("user").querySelector(".content").textContent = question;
+  // 助手气泡（含检索状态 + 引用容器）
+  const bot = addBubble("bot");
+  const contentEl = bot.querySelector(".content");
+  const status = document.createElement("div");
+  status.className = "status";
+  status.textContent = "正在检索制度…";
+  bot.appendChild(status);
+  const srcBox = document.createElement("div");
+  srcBox.className = "sources";
+  bot.appendChild(srcBox);
+
+  try {
+    const resp = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, question }),
+    });
+    // 基础校验类错误：HTTP 非 200，直接取出中文 message
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ message: "请求失败" }));
+      status.remove();
+      showError(err.message || "请求失败");
+      sendBtn.disabled = false;
+      return;
+    }
+    // 读取流并逐事件解析
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let retrieving = true;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const raw = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const ev = parseEvent(raw);
+        if (!ev) continue;
+        if (ev.event === "retrieving") {
+          // 保持「正在检索制度…」状态
+        } else if (ev.event === "token") {
+          if (retrieving) { status.remove(); retrieving = false; }
+          contentEl.textContent += ev.data.delta;   // 打字机效果
+          chatEl.scrollTop = chatEl.scrollHeight;
+        } else if (ev.event === "sources") {
+          renderSources(srcBox, ev.data);            // 回答底部展示引用
+        } else if (ev.event === "error") {
+          status.remove();
+          showError(ev.data.message);
+        } else if (ev.event === "done") {
+          if (retrieving) status.remove();
+        }
+      }
+    }
+  } catch (e) {
+    status.remove();
+    showError("网络错误：" + e.message);
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+sendBtn.addEventListener("click", send);
+inputEl.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+</script>
+</body>
+</html>
