@@ -78,6 +78,19 @@ def init_db() -> None:
             token TEXT PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL,
             expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_token_user ON auth_tokens(username);
+        -- 待核销/已核销券记录（会员端"使用"生成，收银端据此核销）
+        CREATE TABLE IF NOT EXISTS redemptions (
+            code TEXT PRIMARY KEY,
+            coupon_key TEXT NOT NULL,
+            coupon_name TEXT,
+            coupon_type TEXT,
+            status TEXT NOT NULL,
+            member_name TEXT,
+            created_at TEXT NOT NULL,
+            redeemed_at TEXT,
+            order_amount REAL,
+            new_amount REAL);
+        CREATE INDEX IF NOT EXISTS idx_rdm_status ON redemptions(status);
         """
     )
     conn.commit(); conn.close()
@@ -249,67 +262,138 @@ def to_sources(chunks: List[Dict[str, str]]):
 # =====================================================================
 # 会员端口：基于检索的「门店可用性 + 使用规则」回答构造
 # =====================================================================
-def build_member_answer(question: str, chunks: List[Dict[str, str]]) -> str:
-    """
-    从检索到的知识库片段中，提取与「适用门店 / 使用规则」相关的句子，
-    组织成会员可读的回答，并标注来源章节。mock 下为抽取式（非生成式）。
-    """
-    if not chunks:
-        return ("目前知识库中未检索到该券的相关规则。为避免给出错误口径，"
-                "建议联系门店运营或活动策划员核实后再使用。")
+# =====================================================================
+# 结构化券知识（基于《会员权益知识库》2.1~2.3 提炼）
+# 问答 / 收银计算 / 会员选券 / 核销 统一以本字典为唯一数据源，确保口径一致
+# =====================================================================
+COUPONS = {
+    "man200_30": {
+        "key": "man200_30", "name": "满200减30全门店通用券", "type": "满减券",
+        "threshold": 200.0, "face": 30.0,
+        "stores": "全门店通用（所有拾光连锁门店均可使用）",
+        "rule": "单笔订单满200元可用，立减30元；不与其他满减券叠加。",
+        "stack": "不与其它满减券叠加；与折扣券/赠品券能否同用，以当前生效活动版本为准。",
+        "validity": "以券面标注的生效日期与有效期为准。",
+        "alias": ["满200减30", "满200减30券", "满200减30的全门店通用券", "满减"],
+    },
+    "discount85": {
+        "key": "discount85", "name": "8.5折会员折扣券", "type": "折扣券",
+        "rate": 0.85,
+        "stores": "全门店通用（限会员等级≥银卡）",
+        "rule": "会员银卡及以上可用，同一会员同日同券限用1次，按订单金额8.5折计算。",
+        "stack": "与满减券能否同用，以当前生效活动版本为准。",
+        "validity": "以券面生效日期为准。",
+        "alias": ["8.5折", "折扣券", "会员折扣券", "折扣"],
+    },
+    "voucher5": {
+        "key": "voucher5", "name": "5元抵用券", "type": "抵用券",
+        "threshold": 0.0, "face": 5.0,
+        "stores": "全门店通用",
+        "rule": "下单直接抵用5元，无使用门槛、不找零。",
+        "stack": "可与满减券、折扣券同用，以活动版本为准。",
+        "validity": "以券面有效期为准。",
+        "alias": ["5元抵用", "抵用券", "5元抵用券", "抵用"],
+    },
+    "exchangeA": {
+        "key": "exchangeA", "name": "兑换券A（赠品券）", "type": "赠品券/兑换券",
+        "exchange": True,
+        "stores": "按活动版本指定的核销门店与有效期（见券面核销门店列表）",
+        "rule": "在指定核销门店、有效期内兑换对应赠品；一经核销即不可撤销。",
+        "stack": "不与现金抵扣类券同用。",
+        "validity": "以券面有效期为准。",
+        "alias": ["兑换券", "兑换券A", "赠品券", "兑换", "赠品"],
+    },
+}
 
-    # 命中与问题相关的券类型关键词，便于聚焦与重排
+
+def match_coupon(text: str):
+    """从问题描述中识别具体券，返回 coupon_key；识别不到返回 None。"""
+    t = (text or "").lower()
+    m = re.search(r"满\s*(\d+)\s*减\s*(\d+)", t)
+    if m:
+        th, fa = float(m.group(1)), float(m.group(2))
+        for c in COUPONS.values():
+            if c["type"] == "满减券" and c.get("threshold") == th and c.get("face") == fa:
+                return c["key"]
+    for key, c in COUPONS.items():
+        for a in c.get("alias", []):
+            if a.lower() in t:
+                return key
+    if "折扣" in t or "折" in t:
+        return "discount85"
+    if "抵用" in t:
+        return "voucher5"
+    if "兑换" in t or "赠品" in t:
+        return "exchangeA"
+    if "满减" in t or "满" in t:
+        return "man200_30"
+    return None
+
+
+def compute_coupon(key: str, order_amount: float) -> Optional[Dict]:
+    """确定性计算核销后金额；返回 usable / new_amount / reason 等。"""
+    c = COUPONS.get(key)
+    if not c:
+        return None
+    t = c["type"]
+    if t == "满减券":
+        th, fa = c["threshold"], c["face"]
+        if order_amount < th:
+            return {"coupon_type": t, "usable": False, "new_amount": round(order_amount, 2),
+                    "reason": f"订单¥{order_amount:.0f}未达满¥{th:.0f}门槛，不可使用", "note": c["rule"]}
+        return {"coupon_type": t, "usable": True, "new_amount": round(order_amount - fa, 2),
+                "reason": f"满¥{th:.0f}减¥{fa:.0f}，已减¥{fa:.0f}", "note": c["rule"]}
+    if t == "折扣券":
+        rate = c["rate"]
+        return {"coupon_type": t, "usable": True, "new_amount": round(order_amount * rate, 2),
+                "reason": f"按{rate * 10:.1f}折计算", "note": c["rule"]}
+    if t == "抵用券":
+        fa = c["face"]
+        return {"coupon_type": t, "usable": True, "new_amount": round(max(order_amount - fa, 0), 2),
+                "reason": f"抵用¥{fa:.0f}", "note": c["rule"]}
+    if "兑换" in t or "赠品" in t:
+        return {"coupon_type": t, "usable": True, "new_amount": round(order_amount, 2),
+                "reason": "赠品券核销，不抵扣金额，兑换对应赠品", "note": c["rule"], "exchange": True}
+    return None
+
+
+def answer_question(question: str) -> str:
+    """按「券类型 + 问题意图」返回针对性回答；不同问题给不同答案。"""
     q = question
-    focus = ""
-    if "满减" in q or re.search(r"满\s*\d+\s*减", q):
-        focus, kw = "满减券", "满减"
-    elif "折扣" in q or "折" in q:
-        focus, kw = "折扣券", "折扣"
-    elif "兑换" in q or "赠品" in q:
-        focus, kw = "兑换/赠品券", "兑换"
-    elif "抵用" in q:
-        focus, kw = "抵用券", "抵用"
-    else:
-        kw = None
+    key = match_coupon(q)
+    intent_stores = any(k in q for k in ["门店", "哪里用", "哪些店", "哪家店", "适用门店",
+                                         "可以使用", "能用吗", "可用门店", "在门店", "什么店", "哪能用"])
+    intent_rule = any(k in q for k in ["规则", "怎么用", "如何使用", "如何使", "条件", "限制", "要求", "怎么使"])
+    intent_stack = any(k in q for k in ["叠加", "一起用", "同时用", "同用", "共用", "能不能一起", "能否叠加"])
+    intent_valid = any(k in q for k in ["有效期", "多久", "过期", "时效", "什么时候过期"])
+    intent_redeem = "核销" in q
 
-    # 重排：优先把命中焦点券类型的片段排到前面，提升相关性
-    if kw:
-        chunks = sorted(chunks, key=lambda c: (0 if kw in c["section"] or kw in c["content"] else 1, c.get("score", 0)))
+    if not key:
+        if intent_stores:
+            return "各优惠券可用门店如下：\n" + "\n".join(f"· {c['name']}：{c['stores']}" for c in COUPONS.values())
+        if intent_stack:
+            return "各优惠券叠加规则如下：\n" + "\n".join(f"· {c['name']}：{c['stack']}" for c in COUPONS.values())
+        if intent_valid:
+            return "各优惠券有效期均以券面标注的生效日期与有效期为准；如有疑问请联系门店运营核实。"
+        return ("未识别到具体优惠券。您可以这样问我：\n"
+                "· 「满200减30的券可以在哪些门店使用？」\n"
+                "· 「8.5折券的使用规则是什么？」\n"
+                "· 「兑换券A怎么核销？」\n"
+                "也可以直接在下方「我的优惠券」中选择使用。")
 
-    # 标题噪声过滤：跳过章节标题行（如「第二章…」「2.1 满减券」）
-    def is_title(s: str) -> bool:
-        return bool(re.match(r"^第.+[章篇节]", s)) or bool(re.match(r"^\d+(\.\d+)+\s*[\u4e00-\u9fa5]+$", s))
-
-    lines: List[str] = []
-    seen = set()
-    for c in chunks:
-        clean = re.sub(r"^[#>\-\s]+", "", c["content"], flags=re.M)   # 去 Markdown 标题/引用符
-        clean = re.sub(r"[-]{3,}", "", clean)
-        for sent in re.split(r"[。；;！!？?\n]", clean):
-            sent = sent.strip().lstrip("-*•")
-            if not sent or sent in seen or is_title(sent):
-                continue
-            if any(k in sent for k in
-                   ["门店", "通用", "适用", "核销", "范围", "规则", "口径", "减",
-                    "折", "叠加", "等级", "有效期", "品类", "限用", "会员", "一致"]):
-                lines.append(f"· {sent}（来源：《{c['section']}》）")
-                seen.add(sent)
-            if len(lines) >= 6:
-                break
-        if len(lines) >= 6:
-            break
-
-    if not lines:
-        norm = lambda s: re.sub(r"\s+", " ", re.sub(r"^[#>\-\s]+", "", s)).strip()[:80]
-        lines = [f"· {norm(c['content'])}（来源：《{c['section']}》）" for c in chunks[:3]]
-
-    header = ("根据《会员权益知识库》，为您整理该优惠券的可用门店与使用规则如下：\n"
-              if not focus else
-              f"根据《会员权益知识库》，为您整理【{focus}】的可用门店与使用规则如下：\n")
-    footer = ("\n\n温馨提示：以上口径以当前生效版本为准，最终以业务负责人维护的正式版本为准。"
-              if focus else
-              "\n\n温馨提示：以上口径以当前生效版本为准；若遇版本冲突或接口异常，请由门店运营/隐私专员核对。")
-    return header + "\n".join(lines) + footer
+    c = COUPONS[key]
+    if intent_stores:
+        return f"{c['name']} 可用门店：{c['stores']}。"
+    if intent_stack:
+        return f"{c['name']} 叠加规则：{c['stack']}"
+    if intent_valid:
+        return f"{c['name']} 有效期：{c['validity']}"
+    if intent_redeem:
+        return f"{c['name']} 核销说明：{c['rule']}"
+    if intent_rule:
+        return f"{c['name']} 使用规则：{c['rule']}"
+    # 默认：门店 + 规则（精简，不堆砌）
+    return f"{c['name']}\n可用门店：{c['stores']}\n使用规则：{c['rule']}"
 
 
 # =====================================================================
@@ -345,19 +429,13 @@ async def member_chat(request: Request):
 
     def event_stream() -> Generator[str, None, None]:
         try:
-            history = get_history(session_id, HISTORY_ROUNDS)
             save_message(session_id, "user", question, None)
         except Exception:
             yield sse("error", {"code": 50003, "message": "消息保存失败，请稍后重试"}); return
 
         try:
-            yield sse("retrieving", {"stage": "retrieving"})
-            chunks = ma.search_benefit_rule(KB, question, top_k=3)
-        except Exception:
-            yield sse("error", {"code": 50001, "message": "权益检索服务异常，请稍后重试"}); return
-
-        try:
-            answer = build_member_answer(question, chunks)
+            # 意图驱动的精确问答：按券类型+问题意图返回针对性答案
+            answer = answer_question(question)
             buf: List[str] = []
             # mock 打字机：按 6 字一段输出（真实 LLM 可替换为流式 delta）
             for i in range(0, len(answer), 6):
@@ -369,9 +447,7 @@ async def member_chat(request: Request):
             yield sse("error", {"code": 50002, "message": "模型服务暂时不可用，请稍后重试"}); return
 
         try:
-            sources = to_sources(chunks)
-            yield sse("sources", sources)
-            save_message(session_id, "assistant", full, json.dumps(sources, ensure_ascii=False))
+            save_message(session_id, "bot", full, None)
             yield sse("done", {"finish_reason": "stop"})
         except Exception:
             yield sse("error", {"code": 50003, "message": "消息保存失败，请稍后重试"})
@@ -404,25 +480,124 @@ async def cashier_check(request: Request):
         return JSONResponse(status_code=400, content={"code": 40001, "message": "券描述不能为空"})
 
     trace_id = "CASH-" + hashlib.md5(f"{coupon_text}{order_amount}{time.time()}".encode()).hexdigest()[:8]
-    try:
-        res = ma.cashier_check(KB, coupon_text, order_amount, trace_id=trace_id)
-    except Exception:
-        return JSONResponse(status_code=500, content={"code": 50001, "message": "收银核验服务异常，请稍后重试"})
-
-    payload = {
-        "trace_id": trace_id,
-        "coupon_text": coupon_text,
+    key = match_coupon(coupon_text)
+    if not key:
+        return JSONResponse(content={
+            "trace_id": trace_id, "coupon_text": coupon_text,
+            "order_amount": round(order_amount, 2),
+            "coupon_type": None, "usable": None, "new_amount": None,
+            "reason": "无法识别该券类型，请转人工或核对券面信息",
+            "escalate": True, "handler": "活动策划员", "sources": [], "stores": None
+        })
+    comp = compute_coupon(key, order_amount)
+    comp.update({
+        "trace_id": trace_id, "coupon_text": coupon_text,
         "order_amount": round(order_amount, 2),
-        "coupon_type": res.get("coupon_type"),
-        "usable": res.get("usable"),
-        "new_amount": res.get("new_amount"),
-        "reason": res.get("reason"),
-        "note": res.get("note"),
-        "escalate": bool(res.get("escalate")),
-        "handler": res.get("handler"),
-        "sources": res.get("sources", []),
-    }
-    return JSONResponse(content=payload)
+        "stores": COUPONS[key]["stores"],
+        "escalate": False, "handler": None, "sources": []
+    })
+    return JSONResponse(content=comp)
+
+
+# =====================================================================
+# 会员端：选择使用优惠券 -> 生成待核销券（收银端据此核销）
+# =====================================================================
+@app.post("/member/use_coupon")
+async def member_use_coupon(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"code": 40004, "message": "请求格式错误，应为JSON"})
+    user = get_user_from_token(extract_token(request, data))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录会员端"})
+    if user["role"] != "member":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅会员可访问"})
+    key = (data.get("coupon_key") or "").strip()
+    c = COUPONS.get(key)
+    if not c:
+        return JSONResponse(status_code=400, content={"code": 40007, "message": "未知优惠券"})
+    code = "RDM-" + secrets.token_hex(3).upper()
+    conn = db()
+    while conn.execute("SELECT 1 FROM redemptions WHERE code=?", (code,)).fetchone():
+        code = "RDM-" + secrets.token_hex(3).upper()
+    conn.execute(
+        "INSERT INTO redemptions(code, coupon_key, coupon_name, coupon_type, status, member_name, created_at) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (code, key, c["name"], c["type"], "pending", user["username"], now_iso()))
+    conn.commit(); conn.close()
+    return JSONResponse(content={"code": code, "coupon_name": c["name"],
+                                 "coupon_type": c["type"], "stores": c["stores"]})
+
+
+# =====================================================================
+# 收银端：核销优惠券 -> 标记已用并计算核销后金额
+# =====================================================================
+@app.post("/cashier/redeem")
+async def cashier_redeem(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"code": 40004, "message": "请求格式错误，应为JSON"})
+    user = get_user_from_token(extract_token(request, data))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录收银端"})
+    if user["role"] != "admin":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅收银/管理员可访问"})
+    code = (data.get("code") or "").strip().upper()
+    try:
+        order_amount = float(data.get("order_amount"))
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"code": 40005, "message": "订单金额必须为数字"})
+    if not code:
+        return JSONResponse(status_code=400, content={"code": 40008, "message": "核销码不能为空"})
+    conn = db()
+    row = conn.execute(
+        "SELECT coupon_key, status, coupon_name, coupon_type FROM redemptions WHERE code=?",
+        (code,)).fetchone()
+    if not row:
+        conn.close()
+        return JSONResponse(status_code=404, content={"code": 40401, "message": "核销码无效或不存在"})
+    ck, status, name, ctype = row
+    if status == "used":
+        conn.close()
+        return JSONResponse(status_code=409,
+                            content={"code": 40901, "message": "该券已核销，不可重复使用",
+                                     "coupon_name": name, "coupon_type": ctype, "already_used": True})
+    comp = compute_coupon(ck, order_amount)
+    if not comp:
+        conn.close()
+        return JSONResponse(status_code=400, content={"code": 40001, "message": "券类型计算失败"})
+    if not comp["usable"]:
+        conn.close()
+        return JSONResponse(content={"code": 40002, "message": comp["reason"],
+                                     "coupon_name": name, "coupon_type": ctype, "usable": False})
+    new_amount = comp["new_amount"]
+    conn.execute(
+        "UPDATE redemptions SET status='used', order_amount=?, new_amount=?, redeemed_at=? WHERE code=?",
+        (order_amount, new_amount, now_iso(), code))
+    conn.commit(); conn.close()
+    return JSONResponse(content={
+        "ok": True, "code": code, "coupon_name": name, "coupon_type": ctype,
+        "order_amount": round(order_amount, 2), "new_amount": new_amount,
+        "reason": comp["reason"], "exchange": comp.get("exchange", False)})
+
+
+# 收银端：查看待核销券列表
+@app.get("/cashier/pending")
+async def cashier_pending(request: Request):
+    user = get_user_from_token(extract_token(request))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期"})
+    if user["role"] != "admin":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足"})
+    conn = db()
+    rows = conn.execute(
+        "SELECT code, coupon_name, coupon_type, created_at FROM redemptions "
+        "WHERE status='pending' ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return JSONResponse([{"code": r[0], "coupon_name": r[1], "coupon_type": r[2], "created_at": r[3]}
+                         for r in rows])
 
 
 # =====================================================================

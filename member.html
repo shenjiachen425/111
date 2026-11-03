@@ -28,6 +28,20 @@
   #q { flex: 1; border: 1px solid #d6deec; border-radius: 22px; padding: 11px 16px; font-size: 14px; outline: none; }
   #send { background: #ff6b35; color: #fff; border: none; border-radius: 22px; padding: 0 22px; font-size: 14px; cursor: pointer; }
   #send:disabled { opacity: .5; cursor: default; }
+  .coupon-list { display: flex; gap: 10px; overflow-x: auto; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e3e8f2; }
+  .c-card { min-width: 158px; border: 1px solid #e3e8f2; border-radius: 12px; padding: 10px 12px; background: #fff; flex: 0 0 auto; box-shadow: 0 1px 3px rgba(0,0,0,.03); }
+  .c-name { font-size: 13px; font-weight: 600; color: #2d3e63; margin-bottom: 4px; }
+  .c-type { display: inline-block; font-size: 11px; color: #ff6b35; border: 1px solid #ffd9c7; border-radius: 6px; padding: 1px 6px; margin-bottom: 6px; }
+  .c-stores { font-size: 11px; color: #6b7794; margin-bottom: 4px; }
+  .c-rule { font-size: 11px; color: #9aa6c4; margin-bottom: 8px; line-height: 1.4; }
+  .c-card button { width: 100%; background: #ff6b35; color: #fff; border: none; border-radius: 8px; padding: 7px; font-size: 12px; cursor: pointer; }
+  .c-card button:disabled { opacity: .5; cursor: default; }
+  .my-redeem { display: none; margin: 10px 16px; background: #e9f9f0; border: 1px solid #8bd9aa; border-radius: 12px; padding: 12px 14px; }
+  .rd-title { font-size: 14px; font-weight: 700; color: #1a9e54; margin-bottom: 6px; }
+  .rd-code { font-size: 13px; margin-bottom: 4px; }
+  .rd-code b { font-size: 17px; letter-spacing: 1px; color: #1a9e54; }
+  .rd-info { font-size: 12px; color: #4a5572; margin-bottom: 4px; }
+  .rd-tip { font-size: 12px; color: #6b7794; }
 </style>
 </head>
 <body>
@@ -37,6 +51,8 @@
   <span id="who" class="who"></span>
   <a class="back" href="#" id="logout">退出</a>
 </header>
+<div id="coupon-list" class="coupon-list"></div>
+<div id="my-redeem" class="my-redeem"></div>
 <div id="log">
   <div class="msg bot">您好，我是拾光会员权益智能体。请问您想了解哪张优惠券？例如：
 「满200减30的券可以在哪些门店使用？」或「折扣券的使用规则是什么？」</div>
@@ -72,6 +88,50 @@ document.getElementById("logout").onclick = async (e)=>{
   await fetch("/logout", {method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN}, body: JSON.stringify({token: TOKEN})}).catch(()=>{});
   localStorage.clear(); location.href = "/login";
 };
+
+// 我的优惠券（与后端 COUPONS 一致）：可直接选择使用，生成待核销券
+const COUPON_LIST = [
+  {key:"man200_30", name:"满200减30全门店通用券", type:"满减券", stores:"全门店通用", rule:"单笔满200减30，不叠加"},
+  {key:"discount85", name:"8.5折会员折扣券", type:"折扣券", stores:"全门店(限≥银卡)", rule:"银卡以上8.5折，同日限1次"},
+  {key:"voucher5", name:"5元抵用券", type:"抵用券", stores:"全门店通用", rule:"无门槛抵5元，不找零"},
+  {key:"exchangeA", name:"兑换券A（赠品券）", type:"赠品券/兑换券", stores:"指定核销门店", rule:"指定门店兑换赠品，核销后不可撤销"},
+];
+
+function renderCoupons(){
+  const box = document.getElementById("coupon-list");
+  box.innerHTML = "";
+  COUPON_LIST.forEach(c=>{
+    const d = document.createElement("div");
+    d.className = "c-card";
+    d.innerHTML = `<div class="c-name">${c.name}</div>
+      <div class="c-type">${c.type}</div>
+      <div class="c-stores">可用：${c.stores}</div>
+      <div class="c-rule">${c.rule}</div>
+      <button data-key="${c.key}">立即使用</button>`;
+    box.appendChild(d);
+  });
+  box.querySelectorAll("button").forEach(b=> b.onclick = ()=> useCoupon(b.dataset.key));
+}
+
+async function useCoupon(key){
+  try{
+    const res = await fetch("/member/use_coupon", {
+      method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN},
+      body: JSON.stringify({coupon_key: key, token: TOKEN})
+    });
+    const r = await res.json();
+    if(!res.ok){ alert(r.message || "操作失败"); return; }
+    const box = document.getElementById("my-redeem");
+    box.style.display = "block";
+    box.innerHTML = `<div class="rd-title">✅ 已生成待核销券</div>
+      <div class="rd-code">核销码：<b>${r.code}</b>（已复制到剪贴板）</div>
+      <div class="rd-info">${r.coupon_name} · ${r.coupon_type}</div>
+      <div class="rd-tip">请到收银端输入此核销码完成核销。</div>`;
+    if(navigator.clipboard) navigator.clipboard.writeText(r.code).catch(()=>{});
+  }catch(e){ alert("网络异常，请重试"); }
+}
+
+renderCoupons();
 
 function addUser(text){ const d=document.createElement("div"); d.className="msg user"; d.textContent=text; log.appendChild(d); scroll(); }
 function addBot(){ const d=document.createElement("div"); d.className="msg bot"; log.appendChild(d); scroll(); return d; }
