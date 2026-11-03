@@ -59,19 +59,17 @@ const log = document.getElementById("log");
 const q = document.getElementById("q");
 const send = document.getElementById("send");
 
-// 登录态校验：无效/过期则回登录页
-(async () => {
-  try{
-    const r = await fetch("/me", {headers:{"Authorization":"Bearer "+TOKEN}});
-    if(!r.ok){ location.href = "/login"; return; }
-    const me = await r.json();
-    document.getElementById("who").textContent = (localStorage.getItem("sg_name")||me.username) + "（会员）";
-  }catch(e){ location.href = "/login"; }
+// 登录态校验：本地解析 JWT 校验过期（不依赖 /me，规避发布网关不透传 Authorization 头）
+(function(){
+  function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(e){ return null; } }
+  const p = parseJwt(TOKEN);
+  if(!p || (p.exp && p.exp*1000 < Date.now())){ localStorage.clear(); location.href = "/login"; return; }
+  document.getElementById("who").textContent = (localStorage.getItem("sg_name")||p.username) + "（会员）";
 })();
 
 document.getElementById("logout").onclick = async (e)=>{
   e.preventDefault();
-  await fetch("/logout", {method:"POST", headers:{"Authorization":"Bearer "+TOKEN}}).catch(()=>{});
+  await fetch("/logout", {method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN}, body: JSON.stringify({token: TOKEN})}).catch(()=>{});
   localStorage.clear(); location.href = "/login";
 };
 
@@ -85,8 +83,8 @@ async function ask(question){
   addUser(question);
   const t = typing();
   const res = await fetch("/member/chat", {
-    method:"POST", headers:{"Content-Type":"application/json", "Authorization":"Bearer "+TOKEN},
-    body: JSON.stringify({session_id: sid, question})
+    method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN},
+    body: JSON.stringify({session_id: sid, question, token: TOKEN})
   });
   t.remove();
   if(res.status === 401 || res.status === 403){

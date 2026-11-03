@@ -23,6 +23,8 @@ import json
 import time
 import sqlite3
 import hashlib
+import base64
+import hmac
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Generator, List, Optional
@@ -34,6 +36,13 @@ import member_agent as ma
 
 # 登录态有效期（小时）
 TOKEN_TTL_HOURS = 8
+
+# 演示用签名密钥（生产应外置为环境变量）。JWT 无状态：签名自带过期，
+# 不依赖服务端存储，避免多实例/无状态部署下 token 查不到导致反复跳登录。
+SECRET_KEY = os.environ.get("SG_SECRET_KEY", "shiguang_member_portal_demo_secret_2024")
+
+# 进程内注销黑名单（演示级；多实例下不强制共享，前端亦会清空 localStorage）
+_REVOKED: set = set()
 
 # ===================== 配置 =====================
 DB_PATH = "app_member.db"
@@ -115,36 +124,75 @@ def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
     return {"username": u, "role": role, "name": name}
 
 
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
 def create_token(username: str, role: str) -> str:
-    token = secrets.token_urlsafe(32)
-    expires = (datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)).isoformat()
-    conn = db()
-    conn.execute("INSERT INTO auth_tokens(token, username, role, expires_at, created_at) VALUES(?,?,?,?,?)",
-                 (token, username, role, expires, now_iso()))
-    conn.commit(); conn.close()
-    return token
+    """签发无状态 JWT（HS256）：payload 内含 username/role/exp，签名自带过期，
+    服务端无需查库即可验签，规避多实例部署下 token 存储不一致问题。"""
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8"))
+    now = int(datetime.now(timezone.utc).timestamp())
+    exp = now + TOKEN_TTL_HOURS * 3600
+    payload = _b64url(json.dumps(
+        {"username": username, "role": role, "iat": now, "exp": exp}).encode("utf-8"))
+    signing_input = f"{header}.{payload}".encode("utf-8")
+    sig = _b64url(hmac.new(SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256).digest())
+    return f"{header}.{payload}.{sig}"
 
 
-def get_user_from_token(authorization: Optional[str]) -> Optional[Dict[str, str]]:
-    """解析 Bearer Token，校验存在性与有效期，返回用户信息或 None。"""
-    if not authorization or not authorization.startswith("Bearer "):
+def get_user_from_token(raw: Optional[str]) -> Optional[Dict[str, str]]:
+    """校验 JWT：兼容「裸 token」或「Bearer <token>」，验签 + 过期 + 黑名单。"""
+    if not raw:
         return None
-    token = authorization[7:].strip()
-    conn = db()
-    row = conn.execute(
-        "SELECT username, role, expires_at FROM auth_tokens WHERE token=?",
-        (token,)).fetchone()
-    conn.close()
-    if not row:
+    token = raw.strip()
+    if token.startswith("Bearer "):
+        token = token[7:].strip()
+    if token in _REVOKED:
         return None
-    username, role, expires_at = row
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    header_b64, payload_b64, sig = parts
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    expected = _b64url(hmac.new(SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256).digest())
+    if not hmac.compare_digest(expected, sig):
+        return None
     try:
-        exp = datetime.fromisoformat(expires_at)
+        payload = json.loads(_b64url_decode(payload_b64))
+        exp = int(payload.get("exp", 0))
     except Exception:
         return None
-    if exp < datetime.now(timezone.utc):
+    if exp < int(datetime.now(timezone.utc).timestamp()):
         return None
-    return {"username": username, "role": role}
+    return {"username": payload.get("username"), "role": payload.get("role")}
+
+
+def extract_token(request: Request, data: Optional[dict] = None) -> Optional[str]:
+    """
+    多来源提取 token，规避发布平台网关不转发标准 Authorization 头的问题：
+      1) 请求体 JSON 的 token 字段（POST 接口，平台对 body 透传）—— 首选
+      2) 自定义头 X-Token
+      3) 标准 Authorization: Bearer <token>
+      4) 查询参数 t / token（兜底）
+    """
+    if isinstance(data, dict) and data.get("token"):
+        return str(data["token"]).strip()
+    x = request.headers.get("X-Token")
+    if x:
+        return x.strip()
+    a = request.headers.get("Authorization")
+    if a:
+        return a.strip()
+    t = request.query_params.get("t") or request.query_params.get("token")
+    if t:
+        return t.strip()
+    return None
 
 
 def db() -> sqlite3.Connection:
@@ -268,16 +316,16 @@ def build_member_answer(question: str, chunks: List[Dict[str, str]]) -> str:
 # 接口1：会员端口问答（SSE）—— 需 member 角色登录
 # =====================================================================
 @app.post("/member/chat")
-async def member_chat(request: Request, authorization: Optional[str] = Header(None)):
-    user = get_user_from_token(authorization)
-    if not user:
-        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录会员端"})
-    if user["role"] != "member":
-        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅会员可访问"})
+async def member_chat(request: Request):
     try:
         data = await request.json()
     except Exception:
         return JSONResponse(status_code=400, content={"code": 40004, "message": "请求格式错误，应为JSON"})
+    user = get_user_from_token(extract_token(request, data))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录会员端"})
+    if user["role"] != "member":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅会员可访问"})
     session_id = (data.get("session_id") or "").strip()
     question = (data.get("question") or "").strip()
     if not session_id:
@@ -336,16 +384,16 @@ async def member_chat(request: Request, authorization: Optional[str] = Header(No
 # 接口2：收银端口核验（JSON）—— 需 admin 角色登录
 # =====================================================================
 @app.post("/cashier/check")
-async def cashier_check(request: Request, authorization: Optional[str] = Header(None)):
-    user = get_user_from_token(authorization)
-    if not user:
-        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录收银端"})
-    if user["role"] != "admin":
-        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅收银/管理员可访问"})
+async def cashier_check(request: Request):
     try:
         data = await request.json()
     except Exception:
         return JSONResponse(status_code=400, content={"code": 40004, "message": "请求格式错误，应为JSON"})
+    user = get_user_from_token(extract_token(request, data))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录收银端"})
+    if user["role"] != "admin":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅收银/管理员可访问"})
     coupon_text = (data.get("coupon_text") or "").strip()
     try:
         order_amount = float(data.get("order_amount"))
@@ -405,20 +453,23 @@ async def login(request: Request):
 
 
 @app.get("/me")
-async def me(authorization: Optional[str] = Header(None)):
-    user = get_user_from_token(authorization)
+@app.get("/me")
+async def me(request: Request):
+    user = get_user_from_token(extract_token(request))
     if not user:
         return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或已过期"})
     return JSONResponse(content={"username": user["username"], "role": user["role"]})
 
 
 @app.post("/logout")
-async def logout(request: Request, authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization[7:].strip()
-        conn = db()
-        conn.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
-        conn.commit(); conn.close()
+async def logout(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = None
+    tok = extract_token(request, data)
+    if tok:
+        _REVOKED.add(tok)
     return JSONResponse(content={"ok": True})
 
 
@@ -447,4 +498,4 @@ def cashier_page():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
