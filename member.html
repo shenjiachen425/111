@@ -11,6 +11,7 @@
   header { background: #2d3e63; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
   header .back { color: #fff; text-decoration: none; opacity: .85; font-size: 13px; margin-left: auto; }
   header .dot { width: 10px; height: 10px; border-radius: 50%; background: #4ecdc4; }
+  header .who { margin-left: auto; font-size: 13px; opacity: .85; }
   #log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
   .msg { max-width: 78%; padding: 12px 15px; border-radius: 14px; line-height: 1.65; font-size: 14px; white-space: pre-wrap; }
   .user { align-self: flex-end; background: #ff6b35; color: #fff; border-bottom-right-radius: 4px; }
@@ -33,7 +34,8 @@
 <header>
   <span class="dot"></span>
   <span>🙋 会员端口 · 优惠券门店与规则咨询</span>
-  <a class="back" href="/">← 返回门户</a>
+  <span id="who" class="who"></span>
+  <a class="back" href="#" id="logout">退出</a>
 </header>
 <div id="log">
   <div class="msg bot">您好，我是拾光会员权益智能体。请问您想了解哪张优惠券？例如：
@@ -50,10 +52,28 @@
   <button id="send">发送</button>
 </div>
 <script>
+const TOKEN = localStorage.getItem("sg_token");
+if(!TOKEN){ location.href = "/login"; }
 const sid = "m-" + Math.random().toString(36).slice(2, 10);
 const log = document.getElementById("log");
 const q = document.getElementById("q");
 const send = document.getElementById("send");
+
+// 登录态校验：无效/过期则回登录页
+(async () => {
+  try{
+    const r = await fetch("/me", {headers:{"Authorization":"Bearer "+TOKEN}});
+    if(!r.ok){ location.href = "/login"; return; }
+    const me = await r.json();
+    document.getElementById("who").textContent = (localStorage.getItem("sg_name")||me.username) + "（会员）";
+  }catch(e){ location.href = "/login"; }
+})();
+
+document.getElementById("logout").onclick = async (e)=>{
+  e.preventDefault();
+  await fetch("/logout", {method:"POST", headers:{"Authorization":"Bearer "+TOKEN}}).catch(()=>{});
+  localStorage.clear(); location.href = "/login";
+};
 
 function addUser(text){ const d=document.createElement("div"); d.className="msg user"; d.textContent=text; log.appendChild(d); scroll(); }
 function addBot(){ const d=document.createElement("div"); d.className="msg bot"; log.appendChild(d); scroll(); return d; }
@@ -65,10 +85,13 @@ async function ask(question){
   addUser(question);
   const t = typing();
   const res = await fetch("/member/chat", {
-    method:"POST", headers:{"Content-Type":"application/json"},
+    method:"POST", headers:{"Content-Type":"application/json", "Authorization":"Bearer "+TOKEN},
     body: JSON.stringify({session_id: sid, question})
   });
   t.remove();
+  if(res.status === 401 || res.status === 403){
+    localStorage.clear(); location.href = "/login"; return;
+  }
   const bot = addBot();
   let sources = [];
   if(res.headers.get("content-type").includes("text/event-stream")){

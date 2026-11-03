@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光连锁 · 登录</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: linear-gradient(135deg, #1f2a44 0%, #2d3e63 100%); min-height: 100vh;
+         display: flex; align-items: center; justify-content: center; color: #1f2a44; }
+  .box { width: 360px; background: #fff; border-radius: 18px; padding: 30px 28px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .logo { width: 56px; height: 56px; border-radius: 14px; background: #ff6b35; color: #fff;
+          display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto 14px; }
+  h1 { text-align: center; font-size: 20px; margin-bottom: 4px; }
+  .sub { text-align: center; font-size: 13px; color: #6b7794; margin-bottom: 20px; }
+  .tabs { display: flex; background: #eef2fb; border-radius: 12px; padding: 4px; margin-bottom: 18px; }
+  .tabs button { flex: 1; border: none; background: transparent; padding: 10px; border-radius: 9px;
+                 font-size: 14px; color: #6b7794; cursor: pointer; }
+  .tabs button.active { background: #fff; color: #2d3e63; font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  label { display: block; font-size: 13px; color: #6b7794; margin-bottom: 6px; }
+  input { width: 100%; border: 1px solid #d6deec; border-radius: 11px; padding: 12px 14px;
+          font-size: 14px; outline: none; margin-bottom: 14px; }
+  #submit { width: 100%; background: #ff6b35; color: #fff; border: none; border-radius: 11px;
+            padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  #submit:disabled { opacity: .6; }
+  #err { color: #d23b3b; font-size: 13px; min-height: 18px; margin-bottom: 10px; text-align: center; }
+  .hint { margin-top: 16px; font-size: 12px; color: #9aa6c4; background: #f6f8fc; border-radius: 10px;
+          padding: 10px 12px; line-height: 1.7; }
+  .hint b { color: #2d3e63; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">拾</div>
+  <h1>拾光连锁 · 统一登录</h1>
+  <div class="sub">不同账号进入不同端口</div>
+
+  <div class="tabs">
+    <button id="tab-admin" class="active" data-role="admin">收银员 / 管理员</button>
+    <button id="tab-member" data-role="member">会员</button>
+  </div>
+
+  <div id="err"></div>
+  <label>账号</label>
+  <input id="username" placeholder="如 admin / cashier01" autocomplete="username">
+  <label>密码</label>
+  <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password">
+
+  <button id="submit">登录</button>
+
+  <div class="hint" id="hint"></div>
+</div>
+<script>
+let role = "admin";
+const hints = {
+  admin: "<b>收银端账号</b><br>admin / Admin@123456（管理员）<br>cashier01 / Cashier@123（收银员）<br>登录后进入【收银端口】",
+  member: "<b>会员端账号</b><br>member01 / Member@123456（张女士）<br>member02 / Member@123456（李先生）<br>登录后进入【会员端口】"
+};
+function setRole(r){
+  role = r;
+  document.getElementById("tab-admin").classList.toggle("active", r==="admin");
+  document.getElementById("tab-member").classList.toggle("active", r==="member");
+  document.getElementById("hint").innerHTML = hints[r];
+  document.getElementById("username").placeholder = r==="admin" ? "如 admin / cashier01" : "如 member01";
+}
+document.getElementById("tab-admin").onclick = ()=> setRole("admin");
+document.getElementById("tab-member").onclick = ()=> setRole("member");
+setRole("admin");
+
+async function doLogin(){
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+  const err = document.getElementById("err");
+  err.textContent = "";
+  if(!username || !password){ err.textContent = "请输入账号和密码"; return; }
+  const btn = document.getElementById("submit"); btn.disabled = true; btn.textContent = "登录中…";
+  try{
+    const res = await fetch("/login", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({username, password, role})
+    });
+    const r = await res.json();
+    if(!res.ok){ err.textContent = r.message || "登录失败"; return; }
+    localStorage.setItem("sg_token", r.token);
+    localStorage.setItem("sg_role", r.role);
+    localStorage.setItem("sg_name", r.name || username);
+    location.href = r.redirect;
+  }catch(e){ err.textContent = "网络异常，请重试"; }
+  finally{ btn.disabled = false; btn.textContent = "登录"; }
+}
+document.getElementById("submit").onclick = doLogin;
+document.getElementById("password").onkeydown = e=>{ if(e.key==="Enter") doLogin(); };
+</script>
+</body>
+</html>

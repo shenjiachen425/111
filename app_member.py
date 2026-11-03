@@ -23,13 +23,17 @@ import json
 import time
 import sqlite3
 import hashlib
-from datetime import datetime, timezone
-from typing import Dict, Generator, List
+import secrets
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Generator, List, Optional
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, Request, Header
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 
 import member_agent as ma
+
+# 登录态有效期（小时）
+TOKEN_TTL_HOURS = 8
 
 # ===================== 配置 =====================
 DB_PATH = "app_member.db"
@@ -55,9 +59,92 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
             role TEXT NOT NULL, content TEXT NOT NULL, sources TEXT, created_at TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, id);
+        -- 账号表：role = admin(收银端) / member(会员端)
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, role TEXT NOT NULL,
+            name TEXT, pw_hash TEXT NOT NULL, salt TEXT NOT NULL,
+            created_at TEXT NOT NULL);
+        -- 登录令牌表
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token TEXT PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL,
+            expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_token_user ON auth_tokens(username);
         """
     )
     conn.commit(); conn.close()
+
+
+# ===================== 账号与鉴权 =====================
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                               salt.encode("utf-8"), 100_000).hex()
+
+
+def seed_users() -> None:
+    """首次启动写入演示账号（仅当无账号时）。生产应改为外部配置/初始化脚本。"""
+    conn = db()
+    n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if n > 0:
+        conn.close(); return
+    demo = [
+        ("admin", "admin", "系统管理员", "Admin@123456"),
+        ("cashier01", "admin", "门店收银员·小王", "Cashier@123"),
+        ("member01", "member", "会员·张女士", "Member@123456"),
+        ("member02", "member", "会员·李先生", "Member@123456"),
+    ]
+    for username, role, name, pw in demo:
+        salt = secrets.token_hex(8)
+        conn.execute(
+            "INSERT INTO users(username, role, name, pw_hash, salt, created_at) VALUES(?,?,?,?,?,?)",
+            (username, role, name, _hash_password(pw, salt), salt, now_iso()))
+    conn.commit(); conn.close()
+    print("[启动] 已写入演示账号：admin / cashier01（收银端）；member01 / member02（会员端）")
+
+
+def authenticate(username: str, password: str) -> Optional[Dict[str, str]]:
+    conn = db()
+    row = conn.execute(
+        "SELECT username, role, name, pw_hash, salt FROM users WHERE username=?",
+        (username,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    u, role, name, pw_hash, salt = row
+    if _hash_password(password, salt) != pw_hash:
+        return None
+    return {"username": u, "role": role, "name": name}
+
+
+def create_token(username: str, role: str) -> str:
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)).isoformat()
+    conn = db()
+    conn.execute("INSERT INTO auth_tokens(token, username, role, expires_at, created_at) VALUES(?,?,?,?,?)",
+                 (token, username, role, expires, now_iso()))
+    conn.commit(); conn.close()
+    return token
+
+
+def get_user_from_token(authorization: Optional[str]) -> Optional[Dict[str, str]]:
+    """解析 Bearer Token，校验存在性与有效期，返回用户信息或 None。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:].strip()
+    conn = db()
+    row = conn.execute(
+        "SELECT username, role, expires_at FROM auth_tokens WHERE token=?",
+        (token,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    username, role, expires_at = row
+    try:
+        exp = datetime.fromisoformat(expires_at)
+    except Exception:
+        return None
+    if exp < datetime.now(timezone.utc):
+        return None
+    return {"username": username, "role": role}
 
 
 def db() -> sqlite3.Connection:
@@ -96,9 +183,10 @@ def get_history(sid: str, rounds: int) -> List[Dict[str, str]]:
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+    seed_users()
     global KB
     KB = ma.load_knowledge()
-    print("[启动] 会员权益知识库与 SQLite 已就绪（双端口）")
+    print("[启动] 会员权益知识库与 SQLite 已就绪（双端口 · 含登录鉴权）")
 
 
 # ===================== 通用工具 =====================
@@ -177,10 +265,15 @@ def build_member_answer(question: str, chunks: List[Dict[str, str]]) -> str:
 
 
 # =====================================================================
-# 接口1：会员端口问答（SSE）
+# 接口1：会员端口问答（SSE）—— 需 member 角色登录
 # =====================================================================
 @app.post("/member/chat")
-async def member_chat(request: Request):
+async def member_chat(request: Request, authorization: Optional[str] = Header(None)):
+    user = get_user_from_token(authorization)
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录会员端"})
+    if user["role"] != "member":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅会员可访问"})
     try:
         data = await request.json()
     except Exception:
@@ -240,10 +333,15 @@ async def member_chat(request: Request):
 
 
 # =====================================================================
-# 接口2：收银端口核验（JSON）
+# 接口2：收银端口核验（JSON）—— 需 admin 角色登录
 # =====================================================================
 @app.post("/cashier/check")
-async def cashier_check(request: Request):
+async def cashier_check(request: Request, authorization: Optional[str] = Header(None)):
+    user = get_user_from_token(authorization)
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录收银端"})
+    if user["role"] != "admin":
+        return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅收银/管理员可访问"})
     try:
         data = await request.json()
     except Exception:
@@ -280,11 +378,61 @@ async def cashier_check(request: Request):
 
 
 # =====================================================================
+# 登录 / 鉴权接口
+# =====================================================================
+@app.post("/login")
+async def login(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"code": 40004, "message": "请求格式错误，应为JSON"})
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    role = (data.get("role") or "").strip()   # admin / member，用于校验账号类型
+    if not username or not password or not role:
+        return JSONResponse(status_code=400, content={"code": 40006, "message": "用户名、密码与角色不能为空"})
+
+    user = authenticate(username, password)
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40102, "message": "用户名或密码错误"})
+    if user["role"] != role:
+        return JSONResponse(status_code=403,
+                            content={"code": 40302,
+                                     "message": f"该账号不是「{'收银端' if role == 'admin' else '会员端'}」账号，请使用对应端口登录"})
+    token = create_token(user["username"], user["role"])
+    return JSONResponse(content={"token": token, "role": user["role"], "name": user.get("name"),
+                                 "redirect": "/cashier" if user["role"] == "admin" else "/member"})
+
+
+@app.get("/me")
+async def me(authorization: Optional[str] = Header(None)):
+    user = get_user_from_token(authorization)
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或已过期"})
+    return JSONResponse(content={"username": user["username"], "role": user["role"]})
+
+
+@app.post("/logout")
+async def logout(request: Request, authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+        conn = db()
+        conn.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+        conn.commit(); conn.close()
+    return JSONResponse(content={"ok": True})
+
+
+# =====================================================================
 # 前端入口
 # =====================================================================
 @app.get("/")
 def index():
-    return FileResponse("portal.html")
+    return RedirectResponse("/login")
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse("login.html")
 
 
 @app.get("/member")
