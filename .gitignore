@@ -1,0 +1,6 @@
+# 运行时产物（非源码，不入库）
+__pycache__/
+*.pyc
+.member_cache/
+.stage1_cache/
+*.db

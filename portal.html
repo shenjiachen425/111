@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光连锁 · 会员权益智能体</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: linear-gradient(135deg, #1f2a44 0%, #2d3e63 100%); color: #fff;
+         min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .logo { width: 64px; height: 64px; border-radius: 16px; background: #ff6b35;
+          display: flex; align-items: center; justify-content: center; font-size: 30px; margin-bottom: 18px; }
+  h1 { font-size: 26px; margin-bottom: 6px; }
+  .sub { opacity: .8; margin-bottom: 36px; font-size: 14px; }
+  .cards { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+  .card { width: 260px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18);
+          border-radius: 16px; padding: 28px 22px; text-decoration: none; color: #fff;
+          transition: transform .15s, background .15s; backdrop-filter: blur(6px); }
+  .card:hover { transform: translateY(-6px); background: rgba(255,255,255,.16); }
+  .card .ic { font-size: 34px; margin-bottom: 12px; }
+  .card h2 { font-size: 19px; margin-bottom: 8px; }
+  .card p { font-size: 13px; opacity: .82; line-height: 1.6; }
+  .tag { display: inline-block; margin-top: 14px; font-size: 12px; padding: 4px 10px;
+         border-radius: 20px; background: #ff6b35; }
+  footer { margin-top: 44px; font-size: 12px; opacity: .6; }
+</style>
+</head>
+<body>
+  <div class="logo">拾</div>
+  <h1>拾光连锁 · 会员权益智能体</h1>
+  <div class="sub">同一张券，门店与小程序一个口径 · 收银即时核验</div>
+  <div class="cards">
+    <a class="card" href="/member">
+      <div class="ic">🙋</div>
+      <h2>会员端口</h2>
+      <p>会员提问智能体：查询某张优惠券可在哪些门店使用，以及详细使用规则。</p>
+      <span class="tag">问答 · 查门店/规则</span>
+    </a>
+    <a class="card" href="/cashier">
+      <div class="ic">🧾</div>
+      <h2>收银端口</h2>
+      <p>收银员输入券与订单金额，智能体直接判定能否使用并算出优惠后金额。</p>
+      <span class="tag">核验 · 能否用/新金额</span>
+    </a>
+  </div>
+  <footer>© 拾光连锁 · 智能体仅可读解释与辅助计算，不修改会员资产</footer>
+</body>
+</html>

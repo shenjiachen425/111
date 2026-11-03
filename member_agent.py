@@ -153,6 +153,111 @@ def log_audit(trace_id: str, business_id: str, rule_version: str,
 
 
 # =====================================================================
+# 2.5 收银端口专用：券可用性判定 + 优惠后金额计算（确定性，非 LLM 猜测）
+# =====================================================================
+def calculate_coupon_discount(coupon_text: str, order_amount: float) -> Dict[str, Any]:
+    """
+    【工具T6·收银计算】解析券面参数并以知识库口径计算：
+      满减券  满X减Y        → 订单≥X 可用，新金额 = 订单 - Y
+      折扣券  X折           → 新金额 = 订单 × (X/10)，需银卡及以上
+      抵用券  N元抵用       → 新金额 = max(0, 订单 - N)
+      兑换/赠品券            → 不减金额，按活动版本核销门店核销
+    无法识别或金额异常 → 返回 escalate=True，交由异常分支转人工。
+    仅计算、不写任何会员资产（符合总则第一条）。
+    """
+    order_amount = float(order_amount)
+    ct = (coupon_text or "").strip()
+
+    # 满减券：满X减Y
+    m = re.search(r"满\s*(\d+)\s*减\s*(\d+)", ct)
+    if m:
+        threshold, reduce = int(m.group(1)), int(m.group(2))
+        if order_amount < threshold:
+            return {"coupon_type": "满减券", "usable": False, "new_amount": round(order_amount, 2),
+                    "reason": f"未达满减门槛（需满{threshold}元，当前{order_amount}元），本券不可用",
+                    "note": "满减券全门店通用、单笔订单满额可用、不与其他满减叠加"}
+        return {"coupon_type": "满减券", "usable": True,
+                "new_amount": round(order_amount - reduce, 2),
+                "reason": f"满{threshold}减{reduce}，已减{reduce}元",
+                "note": "不与其他满减叠加；限指定品类须核对订单品类"}
+
+    # 折扣券：X折
+    m = re.search(r"(\d+(?:\.\d+)?)\s*折", ct)
+    if m:
+        rate = float(m.group(1)) / 10.0
+        if not (0 < rate <= 1):
+            return {"coupon_type": "折扣券", "usable": None, "new_amount": None,
+                    "reason": "折扣率异常，需人工核对", "escalate": True}
+        new = round(order_amount * rate, 2)
+        return {"coupon_type": "折扣券", "usable": True, "new_amount": new,
+                "reason": f"按{m.group(1)}折，优惠后{new}元",
+                "note": "需会员等级≥银卡、同日同券限用1次、不叠加会员等级折扣"}
+
+    # 抵用券：N元抵用
+    m = re.search(r"(\d+)\s*元\s*抵用", ct)
+    if m:
+        reduce = int(m.group(1))
+        if order_amount <= 0:
+            return {"coupon_type": "抵用券", "usable": False, "new_amount": 0.0,
+                    "reason": "订单金额为0，抵用券不可用"}
+        return {"coupon_type": "抵用券", "usable": True,
+                "new_amount": round(max(0.0, order_amount - reduce), 2),
+                "reason": f"抵用{reduce}元，已减{reduce}元"}
+
+    # 兑换券 / 赠品券：不减金额，按活动版本核销门店核销
+    if ("兑换券" in ct) or ("赠品券" in ct):
+        return {"coupon_type": "兑换券/赠品券", "usable": True, "new_amount": round(order_amount, 2),
+                "reason": "兑换/赠品券不减金额；按活动版本指定核销门店与有效期核销",
+                "note": "一经核销不可撤销；退货已兑新券无追回规则（见第四章，属异常）"}
+
+    # 无法识别券类型
+    return {"coupon_type": "未知", "usable": None, "new_amount": None,
+            "reason": "无法识别券类型或金额，需人工核对", "escalate": True}
+
+
+def cashier_check(kb: Dict[str, Any], coupon_text: str, order_amount: float,
+                  trace_id: str = "CASHIER") -> Dict[str, Any]:
+    """
+    收银端口智能体决策入口：检索规则 → 识别异常 → 计算 → 审计留存。
+    返回 {usable, new_amount, coupon_type, reason, escalate, handler, sources}。
+    """
+    # 1) 先检索规则，作为事实引用来源
+    chunks = search_benefit_rule(kb, coupon_text, top_k=3)
+    sources = [{"section": c["section"], "snippet": c["content"][:120]} for c in chunks]
+
+    # 2) 异常识别（版本冲突/系统不可用等强制转人工）
+    exc = identify_exception(f"{coupon_text} 订单{order_amount}元")
+    if exc["need_human"]:
+        handoff = escalate_to_human(
+            reason=f"收银核验触发异常（{exc['type']}）：{exc['trigger']}",
+            handler="活动策划员/数据隐私专员", business_id="BIZ-" + trace_id,
+            version="v-current", status="暂停收银建议待核对",
+            unresolved="异常券由谁定")
+        log_audit(trace_id, "BIZ-" + trace_id, "v-current",
+                  fact_ref="第四章 异常", suggestion="仅提示不编造",
+                  human_change="转人工", signer="收银员")
+        return {"usable": None, "new_amount": None, "coupon_type": "异常",
+                "reason": handoff["text"], "escalate": True, "handler": handoff["handoff"]["handler"],
+                "sources": sources}
+
+    # 3) 确定性计算券可用性与优惠后金额
+    calc = calculate_coupon_discount(coupon_text, order_amount)
+    calc["sources"] = sources
+    if calc.get("escalate"):
+        log_audit(trace_id, "BIZ-" + trace_id, "v-current",
+                  fact_ref="第二章 券规则", suggestion="无法识别，转人工",
+                  human_change="转人工", signer="收银员")
+        calc["handler"] = "活动策划员"
+        return calc
+
+    # 4) 正常结算：审计留存（可重建单次处理）
+    log_audit(trace_id, "BIZ-" + trace_id, "v-current",
+              fact_ref="第二章 券规则", suggestion=calc["reason"],
+              human_change="无", signer="收银员")
+    return calc
+
+
+# =====================================================================
 # 3. 工具执行日志表（供"阶段5 分析"——对照上线检查清单·异常兜底）
 # =====================================================================
 def init_db():

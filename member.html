@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会员端口 · 优惠券咨询</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #f4f6fb; color: #1f2a44; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #2d3e63; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
+  header .back { color: #fff; text-decoration: none; opacity: .85; font-size: 13px; margin-left: auto; }
+  header .dot { width: 10px; height: 10px; border-radius: 50%; background: #4ecdc4; }
+  #log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 78%; padding: 12px 15px; border-radius: 14px; line-height: 1.65; font-size: 14px; white-space: pre-wrap; }
+  .user { align-self: flex-end; background: #ff6b35; color: #fff; border-bottom-right-radius: 4px; }
+  .bot  { align-self: flex-start; background: #fff; border: 1px solid #e3e8f2; border-bottom-left-radius: 4px;
+          box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .src { margin-top: 8px; font-size: 12px; color: #6b7794; border-top: 1px dashed #e3e8f2; padding-top: 6px; }
+  .src b { color: #2d3e63; }
+  .typing { align-self: flex-start; color: #9aa6c4; font-size: 13px; padding: 4px 0; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 18px 8px; }
+  .suggest button { border: 1px solid #d6deec; background: #fff; color: #2d3e63; border-radius: 18px;
+                    padding: 7px 13px; font-size: 13px; cursor: pointer; }
+  .suggest button:hover { background: #eef2fb; }
+  #bar { display: flex; gap: 10px; padding: 14px 18px; background: #fff; border-top: 1px solid #e3e8f2; }
+  #q { flex: 1; border: 1px solid #d6deec; border-radius: 22px; padding: 11px 16px; font-size: 14px; outline: none; }
+  #send { background: #ff6b35; color: #fff; border: none; border-radius: 22px; padding: 0 22px; font-size: 14px; cursor: pointer; }
+  #send:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <span>🙋 会员端口 · 优惠券门店与规则咨询</span>
+  <a class="back" href="/">← 返回门户</a>
+</header>
+<div id="log">
+  <div class="msg bot">您好，我是拾光会员权益智能体。请问您想了解哪张优惠券？例如：
+「满200减30的券可以在哪些门店使用？」或「折扣券的使用规则是什么？」</div>
+</div>
+<div class="suggest">
+  <button data-q="满200减30的券可以在哪些门店使用？">满200减30可在哪些门店？</button>
+  <button data-q="折扣券的使用规则是什么？">折扣券使用规则</button>
+  <button data-q="兑换券和赠品券怎么用？">兑换/赠品券怎么用</button>
+  <button data-q="优惠券能和小程序上的活动叠加吗？">能否叠加</button>
+</div>
+<div id="bar">
+  <input id="q" placeholder="输入您的问题，例如：这张券哪些门店能用？" autocomplete="off">
+  <button id="send">发送</button>
+</div>
+<script>
+const sid = "m-" + Math.random().toString(36).slice(2, 10);
+const log = document.getElementById("log");
+const q = document.getElementById("q");
+const send = document.getElementById("send");
+
+function addUser(text){ const d=document.createElement("div"); d.className="msg user"; d.textContent=text; log.appendChild(d); scroll(); }
+function addBot(){ const d=document.createElement("div"); d.className="msg bot"; log.appendChild(d); scroll(); return d; }
+function typing(){ const d=document.createElement("div"); d.className="typing"; d.textContent="智能体正在检索权益库…"; log.appendChild(d); scroll(); return d; }
+function scroll(){ log.scrollTop = log.scrollHeight; }
+
+async function ask(question){
+  if(!question.trim()) return;
+  addUser(question);
+  const t = typing();
+  const res = await fetch("/member/chat", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({session_id: sid, question})
+  });
+  t.remove();
+  const bot = addBot();
+  let sources = [];
+  if(res.headers.get("content-type").includes("text/event-stream")){
+    const reader = res.body.getReader(); const dec = new TextDecoder();
+    let buf = "", curEvent = "", curData = "";
+    while(true){
+      const {done, value} = await reader.read(); if(done) break;
+      buf += dec.decode(value, {stream:true});
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for(const p of parts){
+        for(const line of p.split("\n")){
+          if(line.startsWith("event:")) curEvent = line.slice(6).trim();
+          else if(line.startsWith("data:")) curData = line.slice(5).trim();
+        }
+        if(curEvent && curData){
+          try{ const obj = JSON.parse(curData);
+            if(curEvent==="token") bot.textContent += obj.delta;
+            else if(curEvent==="sources") sources = obj;
+            else if(curEvent==="error") bot.textContent += "\n[出错] "+obj.message;
+            else if(curEvent==="done"){}
+          }catch(e){}
+          curEvent=""; curData="";
+        }
+      }
+    }
+  }
+  if(sources && sources.length){
+    const s = document.createElement("div"); s.className="src";
+    s.innerHTML = "<b>来源：</b>" + sources.map(x=>`《${x.section}》`).join("、");
+    bot.appendChild(s);
+  }
+  scroll();
+}
+
+send.onclick = ()=>{ const v=q.value; q.value=""; ask(v); };
+q.onkeydown = e=>{ if(e.key==="Enter"){ const v=q.value; q.value=""; ask(v);} };
+document.querySelectorAll(".suggest button").forEach(b=> b.onclick=()=> ask(b.dataset.q));
+</script>
+</body>
+</html>
