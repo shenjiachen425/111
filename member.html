@@ -68,6 +68,7 @@
   <input id="q" placeholder="输入您的问题，例如：这张券哪些门店能用？" autocomplete="off">
   <button id="send">发送</button>
 </div>
+<div style="text-align:center;padding:8px 0 16px;font-size:12px"><a href="/audit" style="color:#2d3e63;text-decoration:none">📋 审计查询（按业务编号重建处理链）</a></div>
 <script>
 const TOKEN = localStorage.getItem("sg_token");
 if(!TOKEN){ location.href = "/login"; }
@@ -185,8 +186,15 @@ async function ask(question){
     }
     if(meta.version) html += ` <span style="color:#9aa6c4">· 资料版本 ${meta.version}</span>`;
     if(meta.biz_id) html += ` <span style="color:#9aa6c4">· 业务编号 ${meta.biz_id}</span>`;
+    if(meta.kb_meta && meta.kb_meta.data_updated_at) html += ` <span style="color:#9aa6c4">· 资料更新 ${meta.kb_meta.data_updated_at}</span>`;
     s.innerHTML = html;
     bot.appendChild(s);
+    if(meta.kb_meta && meta.kb_meta.stale){
+      const w = document.createElement("div"); w.className="src";
+      w.style.borderTop="none"; w.style.color="#c9821a"; w.style.background="#fff4e5";
+      w.innerHTML = "⚠️ " + (meta.kb_meta.note || "资料待刷新，以门店/运营口径为准");
+      bot.appendChild(w);
+    }
     if(meta.escalate){
       const e = document.createElement("div"); e.className="src";
       e.style.borderTop="none"; e.style.color="#c9821a"; e.style.background="#fff4e5";

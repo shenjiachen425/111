@@ -61,6 +61,7 @@
     <div id="rresult"></div>
   </div>
 </div>
+<div style="text-align:center;padding:8px 0 20px;font-size:12px"><a href="/audit" style="color:#2d3e63;text-decoration:none">📋 审计查询（按业务编号重建处理链）</a></div>
 
 <script>
 const TOKEN = localStorage.getItem("sg_token");
@@ -104,6 +105,8 @@ document.getElementById("redeem").onclick = async ()=>{
       let extra = `<span class="k">核销码：</span>${r.code}<br><span class="k">说明：</span>${r.reason}`;
       if(r.rule_version) extra += `<br><span class="k">依据版本：</span>${r.rule_version}`;
       if(r.biz_id) extra += `<br><span class="k">业务编号：</span>${r.biz_id}`;
+      if(r.kb_meta && r.kb_meta.data_updated_at) extra += `<br><span class="k">资料更新：</span>${r.kb_meta.data_updated_at}`;
+      if(r.kb_meta && r.kb_meta.stale) extra += `<br><span class="k" style="color:#c9821a">⚠️ 提示：</span><span style="color:#c9821a">${r.kb_meta.note}</span>`;
       if(r.escalate && r.note){
         extra += `<div class="card wait" style="margin-top:8px;padding:10px 12px"><div class="verdict" style="font-size:15px">⚠️ 待人工确认</div>`
           + `<div class="meta" style="color:#c9821a"><span class="k">触发原因：</span>${r.reason||""}<br>`

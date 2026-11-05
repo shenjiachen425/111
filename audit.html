@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审计查询 · 按业务编号重建处理链</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #f4f6fb; color: #1f2a44; min-height: 100vh; }
+  header { background: #2d3e63; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
+  header .back { color: #fff; text-decoration: none; opacity: .85; font-size: 13px; margin-left: auto; }
+  header .dot { width: 10px; height: 10px; border-radius: 50%; background: #4ecdc4; }
+  .wrap { max-width: 720px; margin: 22px auto; padding: 0 16px; }
+  .panel { background: #fff; border: 1px solid #e3e8f2; border-radius: 16px; padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,.05); margin-bottom: 18px; }
+  .row { display: flex; gap: 10px; }
+  #biz { flex: 1; border: 1px solid #d6deec; border-radius: 12px; padding: 12px 14px; font-size: 14px; outline: none; font-family: inherit; }
+  #go { background: #2d3e63; color: #fff; border: none; border-radius: 12px; padding: 0 22px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  #go:disabled { opacity: .5; cursor: default; }
+  .hint { font-size: 12px; color: #9aa6c4; margin-top: 8px; }
+  .kbmeta { font-size: 12px; color: #6b7794; background: #f7f9fc; border: 1px solid #e3e8f2; border-radius: 10px; padding: 10px 12px; margin-top: 14px; line-height: 1.7; }
+  .kbmeta.stale { background: #fff4e5; border-color: #f3c47a; color: #c9821a; }
+  .chain { margin-top: 14px; }
+  .qitem { border: 1px solid #e3e8f2; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .qitem .role { font-size: 12px; font-weight: 700; }
+  .qitem.user .role { color: #ff6b35; }
+  .qitem.bot .role { color: #2d3e63; }
+  .qitem .ct { font-size: 14px; line-height: 1.6; white-space: pre-wrap; margin-top: 4px; }
+  .qitem .tm { font-size: 11px; color: #9aa6c4; margin-top: 4px; }
+  .rdm { border: 1px solid #8bd9aa; background: #e9f9f0; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; line-height: 1.7; font-size: 13px; }
+  .rdm .vt { font-weight: 700; color: #1a9e54; }
+  .rdm.used { border-color: #b6c2da; background: #f4f6fb; }
+  .rdm.used .vt { color: #4a5572; }
+  .src { margin-top: 8px; font-size: 12px; color: #6b7794; border-top: 1px dashed #cdd6e6; padding-top: 6px; }
+  .empty { text-align: center; color: #9aa6c4; padding: 24px; font-size: 14px; }
+  .recent { font-size: 13px; }
+  .recent .rt { font-size: 12px; color: #6b7794; margin: 12px 0 6px; }
+  .recent .chip { display: inline-block; border: 1px solid #d6deec; background: #fff; border-radius: 16px; padding: 5px 11px; margin: 0 6px 6px 0; cursor: pointer; font-size: 12px; }
+  .recent .chip:hover { background: #eef2fb; }
+  .recent .chip b { color: #2d3e63; }
+  .foot { text-align: center; padding: 8px 0 20px; font-size: 12px; }
+  .foot a { color: #2d3e63; text-decoration: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <span>📋 审计查询 · 按业务编号重建单次处理链</span>
+  <a class="back" href="#" id="logout">退出</a>
+</header>
+<div class="wrap">
+  <div class="panel">
+    <div class="row">
+      <input id="biz" placeholder="输入业务编号，如 BIZ-1A2B3C4D" autocomplete="off">
+      <button id="go">查询</button>
+    </div>
+    <div class="hint">业务编号在会员问答、选券使用、收银核销的结果中均有标注（如「业务编号 BIZ-xxxx」）。可点击下方最近记录快速带入。</div>
+    <div id="result"></div>
+  </div>
+  <div class="panel recent" id="recent">
+    <div class="rt">最近记录（点击带入业务编号）</div>
+    <div id="recent-list">加载中…</div>
+  </div>
+</div>
+<div class="foot"><a href="/member">会员端</a> · <a href="/cashier">收银端</a></div>
+
+<script>
+const TOKEN = localStorage.getItem("sg_token");
+if(!TOKEN){ location.href = "/login"; }
+
+(function(){
+  function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(e){ return null; } }
+  const p = parseJwt(TOKEN);
+  if(!p || (p.exp && p.exp*1000 < Date.now())){ localStorage.clear(); location.href = "/login"; return; }
+})();
+
+document.getElementById("logout").onclick = async (e)=>{
+  e.preventDefault();
+  await fetch("/logout", {method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN}, body: JSON.stringify({token: TOKEN})}).catch(()=>{});
+  localStorage.clear(); location.href = "/login";
+};
+
+const resultEl = document.getElementById("result");
+
+function renderKbMeta(kb){
+  if(!kb) return "";
+  const cls = kb.stale ? "kbmeta stale" : "kbmeta";
+  let h = `<div class="${cls}">资料版本：<b>${kb.version||""}</b> · 更新：<b>${kb.data_updated_at||""}</b>`
+        + ` · 责任方：${kb.owner||""}`;
+  if(kb.stale) h += `<br>⚠️ ${kb.note}`;
+  h += `</div>`;
+  return h;
+}
+
+function esc(s){ return (s||"").replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+function renderResult(r){
+  if(!r || !r.found){
+    resultEl.innerHTML = `<div class="empty">未找到该业务编号对应的处理记录。</div>` + renderKbMeta(r && r.kb_meta);
+    return;
+  }
+  let html = "";
+  // 核销/使用链
+  if(r.redemption_chain && r.redemption_chain.length){
+    html += `<div class="chain"><div class="rt" style="font-size:12px;color:#6b7794;margin:6px 0">核销 / 使用链</div>`;
+    r.redemption_chain.forEach(x=>{
+      const used = x.status === "used";
+      const amt = x.order_amount!=null ? `订单 ¥${Number(x.order_amount).toFixed(2)}` : "";
+      const newAmt = x.new_amount!=null ? ` → 应付 <b>¥${Number(x.new_amount).toFixed(2)}</b>` : "";
+      html += `<div class="rdm ${used?'used':''}"><div class="vt">${used?'✅ 已核销':'⏳ 待核销'} · ${esc(x.coupon_name)}（${esc(x.coupon_type)}）</div>`
+        + `<div>核销码：<b>${esc(x.code)}</b></div>`
+        + `<div>${amt}${newAmt} · 依据版本 ${esc(x.rule_version||'')}</div>`
+        + `<div style="font-size:11px;color:#9aa6c4">生成：${esc(x.created_at)}${x.redeemed_at?' · 核销：'+esc(x.redeemed_at):''} · 业务编号 ${esc(r.biz_id)}</div>`;
+      if(x.sources && x.sources.length){
+        html += `<div class="src">事实引用：` + x.sources.map(s=>`《${esc(s.section)}》`).join("、") + `</div>`;
+      }
+      html += `</div>`;
+    });
+    html += `</div>`;
+  }
+  // 问答链
+  if(r.qa_chain && r.qa_chain.length){
+    html += `<div class="chain"><div class="rt" style="font-size:12px;color:#6b7794;margin:6px 0">问答链（会话 ${esc(r.qa_chain[0].session_id)}）</div>`;
+    r.qa_chain.forEach(x=>{
+      const isUser = x.role === "user";
+      html += `<div class="qitem ${isUser?'user':'bot'}"><div class="role">${isUser?'会员':'智能体'}</div>`
+        + `<div class="ct">${esc(x.content)}</div>`
+        + `<div class="tm">${esc(x.created_at)}</div></div>`;
+    });
+    html += `</div>`;
+  }
+  resultEl.innerHTML = html + renderKbMeta(r.kb_meta);
+}
+
+async function query(biz){
+  biz = (biz||"").trim();
+  if(!biz) return;
+  document.getElementById("biz").value = biz;
+  const go = document.getElementById("go"); go.disabled = true; go.textContent = "查询中…";
+  try{
+    const res = await fetch("/audit/query?biz_id=" + encodeURIComponent(biz), {
+      headers: {"X-Token": TOKEN, "Authorization": "Bearer " + TOKEN}
+    });
+    if(res.status === 401 || res.status === 403){ localStorage.clear(); location.href = "/login"; return; }
+    const r = await res.json();
+    renderResult(r);
+  }catch(e){
+    resultEl.innerHTML = `<div class="empty">网络异常，请重试。</div>`;
+  }finally{ go.disabled = false; go.textContent = "查询"; }
+}
+
+document.getElementById("go").onclick = ()=> query(document.getElementById("biz").value);
+document.getElementById("biz").onkeydown = e=>{ if(e.key==="Enter") query(document.getElementById("biz").value); };
+
+async function loadRecent(){
+  try{
+    const res = await fetch("/audit/list", { headers: {"X-Token": TOKEN, "Authorization": "Bearer " + TOKEN} });
+    if(res.status === 401 || res.status === 403){ localStorage.clear(); location.href = "/login"; return; }
+    const r = await res.json();
+    const box = document.getElementById("recent-list");
+    if((!r.redemptions || !r.redemptions.length) && (!r.qa || !r.qa.length)){
+      box.innerHTML = `<span style="color:#9aa6c4">暂无记录</span>`; return;
+    }
+    let h = "";
+    (r.redemptions||[]).forEach(x=>{
+      h += `<span class="chip" data-biz="${esc(x.biz_id)}">🧾 ${esc(x.coupon_name)} · <b>${esc(x.biz_id)}</b> · ${esc(x.status)}</span>`;
+    });
+    (r.qa||[]).forEach(x=>{
+      h += `<span class="chip" data-biz="${esc(x.biz_id)}">💬 问答 · <b>${esc(x.biz_id)}</b></span>`;
+    });
+    box.innerHTML = h;
+    box.querySelectorAll(".chip").forEach(c=> c.onclick = ()=> query(c.dataset.biz));
+  }catch(e){
+    document.getElementById("recent-list").innerHTML = `<span style="color:#9aa6c4">加载失败</span>`;
+  }
+}
+loadRecent();
+</script>
+</body>
+</html>

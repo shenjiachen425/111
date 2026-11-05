@@ -29,7 +29,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Generator, List, Optional
 
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Request, Header, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 
 import member_agent as ma
@@ -330,6 +330,34 @@ COUPONS = {
 }
 
 
+# 知识库/口径元数据（满足需求 f34/f35：数据过期待刷新提示 + 版本化可追溯）
+KB_META = {
+    "version": "v2026.11",
+    "owner": "会员运营（顾明岚）",
+    "data_updated_at": "2026-11-01",
+    "stale_after_days": 30,
+}
+
+
+def data_freshness() -> Dict[str, object]:
+    """返回口径数据新鲜度；超过 stale_after_days 提示以门店/运营口径为准。"""
+    try:
+        upd = datetime.strptime(KB_META["data_updated_at"], "%Y-%m-%d").date()
+        today = datetime.now(timezone.utc).date()
+        days = (today - upd).days
+    except Exception:
+        days = 0
+    stale = days > KB_META["stale_after_days"]
+    return {
+        "version": KB_META["version"],
+        "owner": KB_META["owner"],
+        "data_updated_at": KB_META["data_updated_at"],
+        "days_since_update": max(days, 0),
+        "stale": stale,
+        "note": "资料待刷新，以门店/运营口径为准" if stale else "",
+    }
+
+
 def match_coupon(text: str):
     """从问题描述中识别具体券，返回 coupon_key；识别不到返回 None。"""
     t = (text or "").lower()
@@ -516,7 +544,7 @@ async def member_chat(request: Request):
             meta = {"items": ans.get("sources", []), "version": ans.get("version", ""),
                     "biz_id": biz, "escalate": ans.get("escalate", False),
                     "reason": ans.get("reason", ""), "handler": ans.get("handler", ""),
-                    "need_confirm": ans.get("need_confirm", "")}
+                    "need_confirm": ans.get("need_confirm", ""), "kb_meta": data_freshness()}
             yield sse("sources", meta)
         except Exception:
             yield sse("error", {"code": 50002, "message": "模型服务暂时不可用，请稍后重试"}); return
@@ -565,7 +593,7 @@ async def cashier_check(request: Request):
             "reason": "无法识别该券类型，请转人工或核对券面信息",
             "escalate": True, "handler": "活动策划员（唐映秋）/ 数据隐私专员（傅景）",
             "need_confirm": "券类型与活动版本", "sources": coupon_sources(),
-            "version": "v2026.11", "stores": None
+            "version": "v2026.11", "stores": None, "kb_meta": data_freshness()
         })
     comp = compute_coupon(key, order_amount)
     comp.update({
@@ -574,7 +602,8 @@ async def cashier_check(request: Request):
         "stores": COUPONS[key]["stores"],
         "rule_version": COUPONS[key]["version"],
         "escalate": False, "handler": None,
-        "sources": coupon_sources(key), "version": COUPONS[key]["version"]
+        "sources": coupon_sources(key), "version": COUPONS[key]["version"],
+        "kb_meta": data_freshness()
     })
     return JSONResponse(content=comp)
 
@@ -611,7 +640,7 @@ async def member_use_coupon(request: Request):
     conn.commit(); conn.close()
     return JSONResponse(content={"code": code, "biz_id": biz, "coupon_name": c["name"],
                                  "coupon_type": c["type"], "stores": c["stores"],
-                                 "rule_version": c["version"]})
+                                 "rule_version": c["version"], "kb_meta": data_freshness()})
 
 
 # =====================================================================
@@ -669,7 +698,8 @@ async def cashier_redeem(request: Request):
         "ok": True, "biz_id": biz, "code": code, "coupon_name": name, "coupon_type": ctype,
         "order_amount": round(order_amount, 2), "new_amount": new_amount,
         "reason": comp["reason"], "exchange": comp.get("exchange", False),
-        "rule_version": COUPONS[ck]["version"], "sources": coupon_sources(ck)
+        "rule_version": COUPONS[ck]["version"], "sources": coupon_sources(ck),
+        "kb_meta": data_freshness()
     }
     # 兑换/赠品券：退货追回规则未明确 -> 标注待确认（不覆盖原单据，不阻断合法核销）
     if comp.get("exchange"):
@@ -697,6 +727,57 @@ async def cashier_pending(request: Request):
     conn.close()
     return JSONResponse([{"code": r[0], "coupon_name": r[1], "coupon_type": r[2], "created_at": r[3]}
                          for r in rows])
+
+
+# =====================================================================
+# 审计链：按业务编号重建单次处理链（需求 P0 可追溯审计）
+# =====================================================================
+@app.get("/audit/query")
+async def audit_query(request: Request, biz_id: str = Query("")):
+    user = get_user_from_token(extract_token(request))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期"})
+    biz = (biz_id or "").strip()
+    if not biz:
+        return JSONResponse(status_code=400, content={"code": 40001, "message": "业务编号不能为空"})
+    conn = db()
+    qrows = conn.execute(
+        "SELECT session_id, role, content, created_at FROM messages WHERE biz_id=? ORDER BY id",
+        (biz,)).fetchall()
+    qa_chain = [{"session_id": r[0], "role": r[1], "content": r[2], "created_at": r[3]} for r in qrows]
+    rrows = conn.execute(
+        "SELECT code, coupon_name, coupon_type, status, order_amount, new_amount, created_at, "
+        "redeemed_at, rule_version, sources FROM redemptions WHERE biz_id=?", (biz,)).fetchall()
+    redemption_chain = [{
+        "code": r[0], "coupon_name": r[1], "coupon_type": r[2], "status": r[3],
+        "order_amount": r[4], "new_amount": r[5], "created_at": r[6], "redeemed_at": r[7],
+        "rule_version": r[8], "sources": (json.loads(r[9]) if r[9] else [])
+    } for r in rrows]
+    conn.close()
+    return JSONResponse({
+        "biz_id": biz, "found": bool(qa_chain or redemption_chain),
+        "kb_meta": data_freshness(), "qa_chain": qa_chain, "redemption_chain": redemption_chain,
+    })
+
+
+@app.get("/audit/list")
+async def audit_list(request: Request, limit: int = 20):
+    user = get_user_from_token(extract_token(request))
+    if not user:
+        return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期"})
+    limit = min(max(limit, 1), 100)
+    conn = db()
+    rrows = conn.execute(
+        "SELECT biz_id, code, coupon_name, status, created_at FROM redemptions "
+        "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    redemptions = [{"biz_id": r[0], "code": r[1], "coupon_name": r[2], "status": r[3], "created_at": r[4]}
+                   for r in rrows]
+    mrows = conn.execute(
+        "SELECT DISTINCT biz_id, session_id, created_at FROM messages "
+        "WHERE biz_id IS NOT NULL ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    qa = [{"biz_id": r[0], "session_id": r[1], "created_at": r[2]} for r in mrows]
+    conn.close()
+    return JSONResponse({"redemptions": redemptions, "qa": qa})
 
 
 # =====================================================================
@@ -771,6 +852,11 @@ def member_page():
 @app.get("/cashier")
 def cashier_page():
     return FileResponse("cashier.html", headers=_NOCACHE)
+
+
+@app.get("/audit")
+def audit_page():
+    return FileResponse("audit.html", headers=_NOCACHE)
 
 
 if __name__ == "__main__":
