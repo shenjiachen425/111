@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>收银端口 · 优惠券核验</title>
+<title>收银端口 · 优惠券核销</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -15,19 +15,10 @@
   .wrap { max-width: 560px; margin: 22px auto; padding: 0 16px; width: 100%; }
   .panel { background: #fff; border: 1px solid #e3e8f2; border-radius: 16px; padding: 22px; box-shadow: 0 4px 16px rgba(0,0,0,.05); }
   label { display: block; font-size: 13px; color: #6b7794; margin-bottom: 6px; }
-  textarea, input { width: 100%; border: 1px solid #d6deec; border-radius: 12px; padding: 12px 14px;
-                   font-size: 14px; outline: none; font-family: inherit; }
-  textarea { resize: vertical; min-height: 64px; margin-bottom: 16px; }
+  input { width: 100%; border: 1px solid #d6deec; border-radius: 12px; padding: 12px 14px;
+          font-size: 14px; outline: none; font-family: inherit; }
   .row { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
   .row > div { flex: 1; }
-  #check { width: 100%; background: #ff6b35; color: #fff; border: none; border-radius: 12px;
-           padding: 13px; font-size: 15px; cursor: pointer; font-weight: 600; }
-  #check:disabled { opacity: .5; cursor: default; }
-  .quick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-  .quick button { border: 1px solid #d6deec; background: #f8fafc; color: #2d3e63; border-radius: 18px;
-                  padding: 6px 12px; font-size: 12px; cursor: pointer; }
-  .quick button:hover { background: #eef2fb; }
-  #result { margin-top: 18px; display: none; }
   .card { border-radius: 14px; padding: 20px; }
   .card.ok   { background: #e9f9f0; border: 1px solid #8bd9aa; }
   .card.no   { background: #fdecec; border: 1px solid #f0a3a3; }
@@ -56,33 +47,10 @@
 <body>
 <header>
   <span class="dot"></span>
-  <span>🧾 收银端口 · 优惠券即时核验</span>
+  <span>🧾 收银端口 · 优惠券核销</span>
   <span id="who" class="who"></span>
   <a class="back" href="#" id="logout">退出</a>
 </header>
-<div class="wrap">
-  <div class="panel">
-    <label>优惠券描述（会员在会员端使用后，此处读取该券信息）</label>
-    <textarea id="coupon" placeholder="例如：满200减30的全门店通用券 / 8.5折会员折扣券 / 5元抵用券"></textarea>
-    <div class="quick">
-      <button data-c="满200减30的全门店通用券" data-a="268">满200减30 · 订单268</button>
-      <button data-c="满200减30的全门店通用券" data-a="150">满200减30 · 订单150(未达标)</button>
-      <button data-c="8.5折会员折扣券" data-a="200">8.5折 · 订单200</button>
-      <button data-c="5元抵用券" data-a="36">5元抵用 · 订单36</button>
-      <button data-c="兑换券A" data-a="120">兑换券A · 订单120</button>
-    </div>
-    <div class="row">
-      <div>
-        <label>订单当前金额（元）</label>
-        <input id="amount" type="number" step="0.01" placeholder="如 268.00">
-      </div>
-    </div>
-    <button id="check">立即核验</button>
-  </div>
-
-  <div id="result"></div>
-</div>
-
 <div class="wrap">
   <div class="panel">
     <label>券核销（会员端「使用」后生成的核销码）</label>
@@ -102,10 +70,6 @@
 <script>
 const TOKEN = localStorage.getItem("sg_token");
 if(!TOKEN){ location.href = "/login"; }
-const coupon = document.getElementById("coupon");
-const amount = document.getElementById("amount");
-const check = document.getElementById("check");
-const result = document.getElementById("result");
 
 // 登录态校验：本地解析 JWT 校验过期（不依赖 /me）
 (function(){
@@ -120,67 +84,6 @@ document.getElementById("logout").onclick = async (e)=>{
   await fetch("/logout", {method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN}, body: JSON.stringify({token: TOKEN})}).catch(()=>{});
   localStorage.clear(); location.href = "/login";
 };
-
-document.querySelectorAll(".quick button").forEach(b=> b.onclick=()=>{
-  coupon.value = b.dataset.c; amount.value = b.dataset.a;
-});
-
-async function doCheck(){
-  const c = coupon.value.trim(), a = parseFloat(amount.value);
-  if(!c){ alert("请填写优惠券描述"); return; }
-  if(isNaN(a)){ alert("请填写有效的订单金额"); return; }
-  check.disabled = true; check.textContent = "核验中…"; result.style.display="none";
-  try{
-    const res = await fetch("/cashier/check", {
-      method:"POST", headers:{"Content-Type":"application/json", "X-Token": TOKEN},
-      body: JSON.stringify({coupon_text: c, order_amount: a, token: TOKEN})
-    });
-    if(res.status === 401 || res.status === 403){ localStorage.clear(); location.href = "/login"; return; }
-    const r = await res.json();
-    render(r);
-  }catch(e){
-    result.style.display="block";
-    result.innerHTML = `<div class="card no"><div class="verdict">⚠️ 核验失败</div>
-      <div class="meta">服务异常，请稍后重试或转人工。</div></div>`;
-  }finally{
-    check.disabled = false; check.textContent = "立即核验";
-  }
-}
-
-function render(r){
-  let cls, icon, title, body = "";
-  if(r.escalate){
-    cls="wait"; icon="⏸"; title="需转人工核对";
-    body = `<div class="meta"><span class="k">原因：</span>${r.reason||""}<br>
-            <span class="k">接手人：</span>${r.handler||"活动策划员/数据隐私专员"}</div>`;
-  } else if(r.usable === true){
-    cls="ok"; icon="✅"; title="可使用";
-    body = `<div class="amounts"><span class="old">¥${r.order_amount.toFixed(2)}</span>
-            <span class="new">¥${Number(r.new_amount).toFixed(2)}</span></div>
-            <div class="meta"><span class="k">券类型：</span>${r.coupon_type||"-"}<br>
-            <span class="k">说明：</span>${r.reason||""}<br>
-            <span class="k">提示：</span>${r.note||"-"}</div>`;
-  } else if(r.usable === false){
-    cls="no"; icon="⛔"; title="不可用";
-    body = `<div class="amounts"><span class="old">¥${r.order_amount.toFixed(2)}</span>
-            <span class="new" style="color:#d23b3b">¥${r.order_amount.toFixed(2)}</span></div>
-            <div class="meta"><span class="k">券类型：</span>${r.coupon_type||"-"}<br>
-            <span class="k">原因：</span>${r.reason||""}</div>`;
-  } else {
-    cls="wait"; icon="⏸"; title="无法判定";
-    body = `<div class="meta">${r.reason||"无法识别，请转人工。"}</div>`;
-  }
-  let src = "";
-  if(r.sources && r.sources.length){
-    src = `<div class="src">来源：${r.sources.map(x=>`《${x.section}》`).join("、")}</div>`;
-  }
-  result.style.display="block";
-  result.innerHTML = `<div class="card ${cls}">
-      <div class="verdict">${icon} ${title}</div>${body}${src}
-      <div class="trace">trace_id: ${r.trace_id||""}</div></div>`;
-}
-
-check.onclick = doCheck;
 
 // ===== 待核销券列表 + 核销 =====
 async function loadPending(){
