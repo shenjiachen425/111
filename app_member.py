@@ -656,19 +656,22 @@ def index():
     return RedirectResponse("/login")
 
 
+_NOCACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
+
 @app.get("/login")
 def login_page():
-    return FileResponse("login.html")
+    return FileResponse("login.html", headers=_NOCACHE)
 
 
 @app.get("/member")
 def member_page():
-    return FileResponse("member.html")
+    return FileResponse("member.html", headers=_NOCACHE)
 
 
 @app.get("/cashier")
 def cashier_page():
-    return FileResponse("cashier.html")
+    return FileResponse("cashier.html", headers=_NOCACHE)
 
 
 if __name__ == "__main__":
