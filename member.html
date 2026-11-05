@@ -51,6 +51,7 @@
   <span id="who" class="who"></span>
   <a class="back" href="#" id="logout">退出</a>
 </header>
+<div style="max-width:560px;margin:6px auto 0;padding:0 16px;font-size:12px;color:#9aa6c4">本结果为辅助信息，最终以门店/运营口径为准</div>
 <div id="coupon-list" class="coupon-list"></div>
 <div id="my-redeem" class="my-redeem"></div>
 <div id="log">
@@ -151,7 +152,7 @@ async function ask(question){
     localStorage.clear(); location.href = "/login"; return;
   }
   const bot = addBot();
-  let sources = [];
+  let meta = null;
   if(res.headers.get("content-type").includes("text/event-stream")){
     const reader = res.body.getReader(); const dec = new TextDecoder();
     let buf = "", curEvent = "", curData = "";
@@ -167,7 +168,7 @@ async function ask(question){
         if(curEvent && curData){
           try{ const obj = JSON.parse(curData);
             if(curEvent==="token") bot.textContent += obj.delta;
-            else if(curEvent==="sources") sources = obj;
+            else if(curEvent==="sources") meta = obj;
             else if(curEvent==="error") bot.textContent += "\n[出错] "+obj.message;
             else if(curEvent==="done"){}
           }catch(e){}
@@ -176,10 +177,24 @@ async function ask(question){
       }
     }
   }
-  if(sources && sources.length){
+  if(meta){
     const s = document.createElement("div"); s.className="src";
-    s.innerHTML = "<b>来源：</b>" + sources.map(x=>`《${x.section}》`).join("、");
+    let html = "";
+    if(meta.items && meta.items.length){
+      html += "<b>事实引用：</b>" + meta.items.map(x=>`《${x.section}》`).join("、");
+    }
+    if(meta.version) html += ` <span style="color:#9aa6c4">· 资料版本 ${meta.version}</span>`;
+    if(meta.biz_id) html += ` <span style="color:#9aa6c4">· 业务编号 ${meta.biz_id}</span>`;
+    s.innerHTML = html;
     bot.appendChild(s);
+    if(meta.escalate){
+      const e = document.createElement("div"); e.className="src";
+      e.style.borderTop="none"; e.style.color="#c9821a"; e.style.background="#fff4e5";
+      e.innerHTML = `⚠️ 已转人工核对<br><span class="k">触发原因：</span>${meta.reason||""}<br>`
+        + `<span class="k">建议接手人：</span>${meta.handler||""}`
+        + (meta.need_confirm?`<br><span class="k">待确认字段：</span>${meta.need_confirm}`:"");
+      bot.appendChild(e);
+    }
   }
   scroll();
 }

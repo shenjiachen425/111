@@ -46,6 +46,7 @@
   <span id="who" class="who"></span>
   <a class="back" href="#" id="logout">退出</a>
 </header>
+<div style="max-width:560px;margin:6px auto 0;padding:0 16px;font-size:12px;color:#9aa6c4">本结果为辅助信息，最终以门店/运营口径为准</div>
 <div class="wrap">
   <div class="panel">
     <label>券核销（会员端「使用」后生成的核销码）</label>
@@ -100,10 +101,18 @@ document.getElementById("redeem").onclick = async ()=>{
     } else if(res.ok && r.ok){
       const newAmt = Number(r.new_amount).toFixed(2);
       const oldAmt = Number(r.order_amount).toFixed(2);
+      let extra = `<span class="k">核销码：</span>${r.code}<br><span class="k">说明：</span>${r.reason}`;
+      if(r.rule_version) extra += `<br><span class="k">依据版本：</span>${r.rule_version}`;
+      if(r.biz_id) extra += `<br><span class="k">业务编号：</span>${r.biz_id}`;
+      if(r.escalate && r.note){
+        extra += `<div class="card wait" style="margin-top:8px;padding:10px 12px"><div class="verdict" style="font-size:15px">⚠️ 待人工确认</div>`
+          + `<div class="meta" style="color:#c9821a"><span class="k">触发原因：</span>${r.reason||""}<br>`
+          + `<span class="k">建议接手人：</span>${r.handler||""}<br>`
+          + `<span class="k">说明：</span>${r.note}</div></div>`;
+      }
       box.innerHTML = `<div class="card ok"><div class="verdict">✅ 核销成功${r.exchange?"（赠品券）":""}</div>
         <div class="amounts"><span class="old">¥${oldAmt}</span><span class="new">¥${newAmt}</span></div>
-        <div class="meta"><span class="k">券：</span>${r.coupon_name}（${r.coupon_type}）<br>
-        <span class="k">核销码：</span>${r.code}<br>        <span class="k">说明：</span>${r.reason}</div></div>`;
+        <div class="meta"><span class="k">券：</span>${r.coupon_name}（${r.coupon_type}）<br>${extra}</div></div>`;
     } else {
       box.innerHTML = `<div class="card no"><div class="verdict">⛔ 不可用</div><div class="meta">${r.message||"该订单不满足使用条件"}</div></div>`;
     }

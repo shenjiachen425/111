@@ -96,6 +96,25 @@ def init_db() -> None:
     conn.commit(); conn.close()
 
 
+def migrate_db() -> None:
+    """审计链增强：为已存在的表补充业务编号/版本/事实引用字段（幂等）。"""
+    adds = [
+        ("messages", "biz_id", "TEXT"),
+        ("redemptions", "biz_id", "TEXT"),
+        ("redemptions", "rule_version", "TEXT"),
+        ("redemptions", "sources", "TEXT"),
+    ]
+    conn = db()
+    for table, col, ctype in adds:
+        try:
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ctype}")
+        except Exception as e:
+            print(f"[迁移] {table}.{col} 跳过：{e}")
+    conn.commit(); conn.close()
+
+
 # ===================== 账号与鉴权 =====================
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
@@ -223,10 +242,10 @@ def ensure_session(sid: str) -> None:
     conn.commit(); conn.close()
 
 
-def save_message(sid: str, role: str, content: str, sources) -> None:
+def save_message(sid: str, role: str, content: str, sources, biz_id: Optional[str] = None) -> None:
     conn = db()
-    conn.execute("INSERT INTO messages(session_id, role, content, sources, created_at) VALUES(?,?,?,?,?)",
-                 (sid, role, content, sources, now_iso()))
+    conn.execute("INSERT INTO messages(session_id, role, content, sources, biz_id, created_at) VALUES(?,?,?,?,?,?)",
+                 (sid, role, content, sources, biz_id, now_iso()))
     conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (now_iso(), sid))
     conn.commit(); conn.close()
 
@@ -244,10 +263,11 @@ def get_history(sid: str, rounds: int) -> List[Dict[str, str]]:
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+    migrate_db()
     seed_users()
     global KB
     KB = ma.load_knowledge()
-    print("[启动] 会员权益知识库与 SQLite 已就绪（双端口 · 含登录鉴权）")
+    print("[启动] 会员权益知识库与 SQLite 已就绪（双端口 · 含登录鉴权 · 审计链）")
 
 
 # ===================== 通用工具 =====================
@@ -274,6 +294,7 @@ COUPONS = {
         "rule": "单笔订单满200元可用，立减30元；不与其他满减券叠加。",
         "stack": "不与其它满减券叠加；与折扣券/赠品券能否同用，以当前生效活动版本为准。",
         "validity": "以券面标注的生效日期与有效期为准。",
+        "version": "v2026.11", "effective_date": "2026-11-01 起生效（以券面为准）",
         "alias": ["满200减30", "满200减30券", "满200减30的全门店通用券", "满减"],
     },
     "discount85": {
@@ -283,6 +304,7 @@ COUPONS = {
         "rule": "会员银卡及以上可用，同一会员同日同券限用1次，按订单金额8.5折计算。",
         "stack": "与满减券能否同用，以当前生效活动版本为准。",
         "validity": "以券面生效日期为准。",
+        "version": "v2026.11", "effective_date": "2026-11-01 起生效（限银卡及以上）",
         "alias": ["8.5折", "折扣券", "会员折扣券", "折扣"],
     },
     "voucher5": {
@@ -292,6 +314,7 @@ COUPONS = {
         "rule": "下单直接抵用5元，无使用门槛、不找零。",
         "stack": "可与满减券、折扣券同用，以活动版本为准。",
         "validity": "以券面有效期为准。",
+        "version": "v2026.11", "effective_date": "2026-11-01 起生效",
         "alias": ["5元抵用", "抵用券", "5元抵用券", "抵用"],
     },
     "exchangeA": {
@@ -301,6 +324,7 @@ COUPONS = {
         "rule": "在指定核销门店、有效期内兑换对应赠品；一经核销即不可撤销。",
         "stack": "不与现金抵扣类券同用。",
         "validity": "以券面有效期为准。",
+        "version": "v2026.11", "effective_date": "2026-11-01 起生效（按券面核销门店）",
         "alias": ["兑换券", "兑换券A", "赠品券", "兑换", "赠品"],
     },
 }
@@ -357,8 +381,28 @@ def compute_coupon(key: str, order_amount: float) -> Optional[Dict]:
     return None
 
 
-def answer_question(question: str) -> str:
-    """按「券类型 + 问题意图」返回针对性回答；不同问题给不同答案。"""
+def gen_biz_id(prefix: str = "BIZ") -> str:
+    """生成业务编号，用于审计链重建（会员识别→权益核验→优惠计算→收银确认→售后反馈）。"""
+    return f"{prefix}-{secrets.token_hex(4).upper()}"
+
+
+def coupon_sources(key: Optional[str] = None) -> List[Dict[str, str]]:
+    """返回事实引用列表（资料版本 + 规则摘要），满足审计『事实引用』要求。"""
+    if key:
+        c = COUPONS.get(key)
+        if c:
+            return [{"section": c["name"], "snippet": c["rule"],
+                     "version": c.get("version", ""), "key": key}]
+    return [{"section": c["name"], "snippet": c["rule"],
+             "version": c.get("version", ""), "key": k} for k, c in COUPONS.items()]
+
+
+def build_answer(question: str) -> Dict:
+    """
+    按「券类型 + 问题意图」返回针对性回答；不同问题给不同答案。
+    返回结构化结果：text / sources(事实引用) / version(资料版本) / escalate(是否转人工)
+    + reason(触发原因) / handler(建议接手人) / need_confirm(待确认字段)。
+    """
     q = question
     key = match_coupon(q)
     intent_stores = any(k in q for k in ["门店", "哪里用", "哪些店", "哪家店", "适用门店",
@@ -367,33 +411,56 @@ def answer_question(question: str) -> str:
     intent_stack = any(k in q for k in ["叠加", "一起用", "同时用", "同用", "共用", "能不能一起", "能否叠加"])
     intent_valid = any(k in q for k in ["有效期", "多久", "过期", "时效", "什么时候过期"])
     intent_redeem = "核销" in q
+    intent_refund = any(k in q for k in ["退货", "退回", "追回", "退掉", "退款", "退券"])
 
     if not key:
         if intent_stores:
-            return "各优惠券可用门店如下：\n" + "\n".join(f"· {c['name']}：{c['stores']}" for c in COUPONS.values())
+            return {"text": "各优惠券可用门店如下：\n" + "\n".join(f"· {c['name']}：{c['stores']}" for c in COUPONS.values()),
+                    "sources": coupon_sources(), "version": "v2026.11", "escalate": False}
         if intent_stack:
-            return "各优惠券叠加规则如下：\n" + "\n".join(f"· {c['name']}：{c['stack']}" for c in COUPONS.values())
+            return {"text": "各优惠券叠加规则如下：\n" + "\n".join(f"· {c['name']}：{c['stack']}" for c in COUPONS.values()),
+                    "sources": coupon_sources(), "version": "v2026.11", "escalate": False}
         if intent_valid:
-            return "各优惠券有效期均以券面标注的生效日期与有效期为准；如有疑问请联系门店运营核实。"
-        return ("未识别到具体优惠券。您可以这样问我：\n"
-                "· 「满200减30的券可以在哪些门店使用？」\n"
-                "· 「8.5折券的使用规则是什么？」\n"
-                "· 「兑换券A怎么核销？」\n"
-                "也可以直接在下方「我的优惠券」中选择使用。")
+            return {"text": "各优惠券有效期均以券面标注的生效日期与有效期为准；如有疑问请联系门店运营核实。",
+                    "sources": coupon_sources(), "version": "v2026.11", "escalate": False}
+        # 未识别到具体券：强制转人工，不硬猜口径
+        return {"text": ("未能识别到具体优惠券或规则依据不足，已为您转人工核对。您可以这样问我：\n"
+                         "· 「满200减30的券可以在哪些门店使用？」\n"
+                         "· 「8.5折券的使用规则是什么？」\n"
+                         "· 「兑换券A怎么核销？」\n"
+                         "也可以直接在下方「我的优惠券」中选择使用。"),
+                "sources": coupon_sources(), "version": "v2026.11",
+                "escalate": True, "reason": "未识别到具体优惠券或规则依据不足，无法给出确定口径",
+                "handler": "活动策划员（唐映秋）/ 会员运营（顾明岚）", "need_confirm": "券类型与适用门店"}
 
     c = COUPONS[key]
+    src = coupon_sources(key)
+    ver = c["version"]
     if intent_stores:
-        return f"{c['name']} 可用门店：{c['stores']}。"
+        return {"text": f"{c['name']} 可用门店：{c['stores']}。", "sources": src, "version": ver, "escalate": False}
     if intent_stack:
-        return f"{c['name']} 叠加规则：{c['stack']}"
+        return {"text": f"{c['name']} 叠加规则：{c['stack']}", "sources": src, "version": ver, "escalate": False}
     if intent_valid:
-        return f"{c['name']} 有效期：{c['validity']}"
+        return {"text": f"{c['name']} 有效期：{c['validity']}", "sources": src, "version": ver, "escalate": False}
     if intent_redeem:
-        return f"{c['name']} 核销说明：{c['rule']}"
+        return {"text": f"{c['name']} 核销说明：{c['rule']}", "sources": src, "version": ver, "escalate": False}
+    if intent_refund and c.get("exchange"):
+        # 兑换/赠品券退货追回规则未明确 -> 转人工（红线兜底）
+        return {"text": (f"{c['name']} 核销说明：{c['rule']}\n"
+                         f"提示：若发生退货，当前无明确的积分/券追回规则，需人工核对后再处理，原单据不覆盖。"),
+                "sources": src, "version": ver, "escalate": True,
+                "reason": "兑换/赠品券退货追回规则未明确", "handler": "活动策划员（唐映秋）",
+                "need_confirm": "退货追回方式"}
     if intent_rule:
-        return f"{c['name']} 使用规则：{c['rule']}"
+        return {"text": f"{c['name']} 使用规则：{c['rule']}", "sources": src, "version": ver, "escalate": False}
     # 默认：门店 + 规则（精简，不堆砌）
-    return f"{c['name']}\n可用门店：{c['stores']}\n使用规则：{c['rule']}"
+    return {"text": f"{c['name']}\n可用门店：{c['stores']}\n使用规则：{c['rule']}",
+            "sources": src, "version": ver, "escalate": False}
+
+
+def answer_question(question: str) -> str:
+    """兼容旧调用的文本接口。"""
+    return build_answer(question)["text"]
 
 
 # =====================================================================
@@ -434,20 +501,28 @@ async def member_chat(request: Request):
             yield sse("error", {"code": 50003, "message": "消息保存失败，请稍后重试"}); return
 
         try:
-            # 意图驱动的精确问答：按券类型+问题意图返回针对性答案
-            answer = answer_question(question)
+            # 意图驱动的精确问答：按券类型+问题意图返回针对性答案（含事实引用/版本/转人工）
+            ans = build_answer(question)
+            text = ans["text"]
+            biz = gen_biz_id()
             buf: List[str] = []
             # mock 打字机：按 6 字一段输出（真实 LLM 可替换为流式 delta）
-            for i in range(0, len(answer), 6):
-                piece = answer[i:i + 6]
+            for i in range(0, len(text), 6):
+                piece = text[i:i + 6]
                 buf.append(piece)
                 yield sse("token", {"delta": piece})
             full = "".join(buf)
+            # 事实引用 / 资料版本 / 业务编号 / 转人工信息 一并发给前端，满足审计链要求
+            meta = {"items": ans.get("sources", []), "version": ans.get("version", ""),
+                    "biz_id": biz, "escalate": ans.get("escalate", False),
+                    "reason": ans.get("reason", ""), "handler": ans.get("handler", ""),
+                    "need_confirm": ans.get("need_confirm", "")}
+            yield sse("sources", meta)
         except Exception:
             yield sse("error", {"code": 50002, "message": "模型服务暂时不可用，请稍后重试"}); return
 
         try:
-            save_message(session_id, "bot", full, None)
+            save_message(session_id, "bot", full, json.dumps(meta, ensure_ascii=False), biz_id=biz)
             yield sse("done", {"finish_reason": "stop"})
         except Exception:
             yield sse("error", {"code": 50003, "message": "消息保存失败，请稍后重试"})
@@ -483,18 +558,23 @@ async def cashier_check(request: Request):
     key = match_coupon(coupon_text)
     if not key:
         return JSONResponse(content={
-            "trace_id": trace_id, "coupon_text": coupon_text,
+            "trace_id": trace_id, "biz_id": gen_biz_id("BIZ"),
+            "coupon_text": coupon_text,
             "order_amount": round(order_amount, 2),
             "coupon_type": None, "usable": None, "new_amount": None,
             "reason": "无法识别该券类型，请转人工或核对券面信息",
-            "escalate": True, "handler": "活动策划员", "sources": [], "stores": None
+            "escalate": True, "handler": "活动策划员（唐映秋）/ 数据隐私专员（傅景）",
+            "need_confirm": "券类型与活动版本", "sources": coupon_sources(),
+            "version": "v2026.11", "stores": None
         })
     comp = compute_coupon(key, order_amount)
     comp.update({
-        "trace_id": trace_id, "coupon_text": coupon_text,
+        "trace_id": trace_id, "biz_id": gen_biz_id("BIZ"), "coupon_text": coupon_text,
         "order_amount": round(order_amount, 2),
         "stores": COUPONS[key]["stores"],
-        "escalate": False, "handler": None, "sources": []
+        "rule_version": COUPONS[key]["version"],
+        "escalate": False, "handler": None,
+        "sources": coupon_sources(key), "version": COUPONS[key]["version"]
     })
     return JSONResponse(content=comp)
 
@@ -519,16 +599,19 @@ async def member_use_coupon(request: Request):
         return JSONResponse(status_code=400, content={"code": 40007, "message": "未知优惠券"})
     digits = "0123456789"
     code = "".join(secrets.choice(digits) for _ in range(6))
+    biz = gen_biz_id("BIZ")
     conn = db()
     while conn.execute("SELECT 1 FROM redemptions WHERE code=?", (code,)).fetchone():
         code = "".join(secrets.choice(digits) for _ in range(6))
     conn.execute(
-        "INSERT INTO redemptions(code, coupon_key, coupon_name, coupon_type, status, member_name, created_at) "
-        "VALUES(?,?,?,?,?,?,?)",
-        (code, key, c["name"], c["type"], "pending", user["username"], now_iso()))
+        "INSERT INTO redemptions(code, coupon_key, coupon_name, coupon_type, status, member_name, created_at, "
+        "biz_id, rule_version, sources) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (code, key, c["name"], c["type"], "pending", user["username"], now_iso(),
+         biz, c["version"], json.dumps(coupon_sources(key), ensure_ascii=False)))
     conn.commit(); conn.close()
-    return JSONResponse(content={"code": code, "coupon_name": c["name"],
-                                 "coupon_type": c["type"], "stores": c["stores"]})
+    return JSONResponse(content={"code": code, "biz_id": biz, "coupon_name": c["name"],
+                                 "coupon_type": c["type"], "stores": c["stores"],
+                                 "rule_version": c["version"]})
 
 
 # =====================================================================
@@ -571,17 +654,32 @@ async def cashier_redeem(request: Request):
         return JSONResponse(status_code=400, content={"code": 40001, "message": "券类型计算失败"})
     if not comp["usable"]:
         conn.close()
-        return JSONResponse(content={"code": 40002, "message": comp["reason"],
+        return JSONResponse(content={"code": 40002, "biz_id": gen_biz_id("BIZ"),
+                                     "message": comp["reason"],
                                      "coupon_name": name, "coupon_type": ctype, "usable": False})
     new_amount = comp["new_amount"]
+    biz = gen_biz_id("BIZ")
     conn.execute(
-        "UPDATE redemptions SET status='used', order_amount=?, new_amount=?, redeemed_at=? WHERE code=?",
-        (order_amount, new_amount, now_iso(), code))
+        "UPDATE redemptions SET status='used', order_amount=?, new_amount=?, redeemed_at=?, "
+        "biz_id=?, rule_version=?, sources=? WHERE code=?",
+        (order_amount, new_amount, now_iso(), biz, COUPONS[ck]["version"],
+         json.dumps(coupon_sources(ck), ensure_ascii=False), code))
     conn.commit(); conn.close()
-    return JSONResponse(content={
-        "ok": True, "code": code, "coupon_name": name, "coupon_type": ctype,
+    resp = {
+        "ok": True, "biz_id": biz, "code": code, "coupon_name": name, "coupon_type": ctype,
         "order_amount": round(order_amount, 2), "new_amount": new_amount,
-        "reason": comp["reason"], "exchange": comp.get("exchange", False)})
+        "reason": comp["reason"], "exchange": comp.get("exchange", False),
+        "rule_version": COUPONS[ck]["version"], "sources": coupon_sources(ck)
+    }
+    # 兑换/赠品券：退货追回规则未明确 -> 标注待确认（不覆盖原单据，不阻断合法核销）
+    if comp.get("exchange"):
+        resp.update({
+            "escalate": True,
+            "note": "赠品券核销后不可撤销；若发生退货，当前无明确积分/券追回规则，需活动策划员（唐映秋）人工核对",
+            "reason": "兑换/赠品券退货追回规则未明确",
+            "handler": "活动策划员（唐映秋）", "need_confirm": "退货追回方式"
+        })
+    return JSONResponse(content=resp)
 
 
 # 收银端：查看待核销券列表
