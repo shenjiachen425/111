@@ -517,10 +517,11 @@ async def member_use_coupon(request: Request):
     c = COUPONS.get(key)
     if not c:
         return JSONResponse(status_code=400, content={"code": 40007, "message": "未知优惠券"})
-    code = "RDM-" + secrets.token_hex(3).upper()
+    digits = "0123456789"
+    code = "".join(secrets.choice(digits) for _ in range(6))
     conn = db()
     while conn.execute("SELECT 1 FROM redemptions WHERE code=?", (code,)).fetchone():
-        code = "RDM-" + secrets.token_hex(3).upper()
+        code = "".join(secrets.choice(digits) for _ in range(6))
     conn.execute(
         "INSERT INTO redemptions(code, coupon_key, coupon_name, coupon_type, status, member_name, created_at) "
         "VALUES(?,?,?,?,?,?,?)",
@@ -544,7 +545,7 @@ async def cashier_redeem(request: Request):
         return JSONResponse(status_code=401, content={"code": 40101, "message": "未登录或登录已过期，请先登录收银端"})
     if user["role"] != "admin":
         return JSONResponse(status_code=403, content={"code": 40301, "message": "权限不足：该接口仅收银/管理员可访问"})
-    code = (data.get("code") or "").strip().upper()
+    code = (data.get("code") or "").strip()
     try:
         order_amount = float(data.get("order_amount"))
     except (TypeError, ValueError):

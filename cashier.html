@@ -55,7 +55,7 @@
   <div class="panel">
     <label>券核销（会员端「使用」后生成的核销码）</label>
     <div id="pending" class="pending"></div>
-    <input id="rcode" placeholder="输入核销码，如 RDM-1A2B3C">
+    <input id="rcode" placeholder="输入核销码，如 123456">
     <div class="row">
       <div>
         <label>订单当前金额（元）</label>
@@ -96,18 +96,14 @@ async function loadPending(){
     box.innerHTML = "";
     list.forEach(p=>{
       const d = document.createElement("div"); d.className="pitem";
-      d.innerHTML = `<span>${p.coupon_name}</span><span class="pc">${p.code}</span><button data-code="${p.code}">填入</button>`;
+      d.innerHTML = `<span>${p.coupon_name}</span><span class="pc">${p.code}</span>`;
       box.appendChild(d);
-    });
-    box.querySelectorAll("button").forEach(b=> b.onclick = ()=>{
-      document.getElementById("rcode").value = b.dataset.code;
-      document.getElementById("rcode").focus();
     });
   }catch(e){}
 }
 
 document.getElementById("redeem").onclick = async ()=>{
-  const code = document.getElementById("rcode").value.trim().toUpperCase();
+  const code = document.getElementById("rcode").value.trim();
   const a = parseFloat(document.getElementById("ramount").value);
   if(!code){ alert("请输入核销码"); return; }
   if(isNaN(a)){ alert("请输入有效的订单金额"); return; }
