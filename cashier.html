@@ -34,11 +34,6 @@
   .meta .k { color: #6b7794; }
   .src { margin-top: 12px; font-size: 12px; color: #6b7794; border-top: 1px dashed #cdd6e6; padding-top: 8px; }
   .trace { margin-top: 8px; font-size: 11px; color: #9aa6c4; }
-  .pending { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-  .pitem { display: flex; align-items: center; gap: 8px; font-size: 13px; background: #f8fafc; border: 1px solid #e3e8f2; border-radius: 8px; padding: 6px 10px; }
-  .pitem .pc { color: #ff6b35; font-weight: 600; letter-spacing: 1px; }
-  .pitem button { margin-left: auto; background: #2d3e63; color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-  .ph { font-size: 12px; color: #9aa6c4; margin-bottom: 10px; }
   #rcode { margin-bottom: 16px; letter-spacing: 1px; text-transform: uppercase; }
   #redeem { width: 100%; background: #2d3e63; color: #fff; border: none; border-radius: 12px; padding: 13px; font-size: 15px; cursor: pointer; font-weight: 600; }
   #redeem:disabled { opacity: .5; cursor: default; }
@@ -54,7 +49,6 @@
 <div class="wrap">
   <div class="panel">
     <label>券核销（会员端「使用」后生成的核销码）</label>
-    <div id="pending" class="pending"></div>
     <input id="rcode" placeholder="输入核销码，如 123456">
     <div class="row">
       <div>
@@ -85,23 +79,7 @@ document.getElementById("logout").onclick = async (e)=>{
   localStorage.clear(); location.href = "/login";
 };
 
-// ===== 待核销券列表 + 核销 =====
-async function loadPending(){
-  const box = document.getElementById("pending");
-  try{
-    const res = await fetch("/cashier/pending", {headers:{"X-Token":TOKEN}});
-    if(!res.ok){ box.innerHTML=""; return; }
-    const list = await res.json();
-    if(!list.length){ box.innerHTML = `<div class="ph">暂无待核销券（会员端「使用」后会在此出现）</div>`; return; }
-    box.innerHTML = "";
-    list.forEach(p=>{
-      const d = document.createElement("div"); d.className="pitem";
-      d.innerHTML = `<span>${p.coupon_name}</span><span class="pc">${p.code}</span>`;
-      box.appendChild(d);
-    });
-  }catch(e){}
-}
-
+// ===== 手动输入核销码 + 订单金额，计算应付 =====
 document.getElementById("redeem").onclick = async ()=>{
   const code = document.getElementById("rcode").value.trim();
   const a = parseFloat(document.getElementById("ramount").value);
@@ -125,8 +103,7 @@ document.getElementById("redeem").onclick = async ()=>{
       box.innerHTML = `<div class="card ok"><div class="verdict">✅ 核销成功${r.exchange?"（赠品券）":""}</div>
         <div class="amounts"><span class="old">¥${oldAmt}</span><span class="new">¥${newAmt}</span></div>
         <div class="meta"><span class="k">券：</span>${r.coupon_name}（${r.coupon_type}）<br>
-        <span class="k">核销码：</span>${r.code}<br><span class="k">说明：</span>${r.reason}</div></div>`;
-      loadPending();
+        <span class="k">核销码：</span>${r.code}<br>        <span class="k">说明：</span>${r.reason}</div></div>`;
     } else {
       box.innerHTML = `<div class="card no"><div class="verdict">⛔ 不可用</div><div class="meta">${r.message||"该订单不满足使用条件"}</div></div>`;
     }
@@ -135,8 +112,6 @@ document.getElementById("redeem").onclick = async ()=>{
     document.getElementById("rresult").innerHTML = `<div class="card no"><div class="verdict">⚠️ 失败</div><div class="meta">网络异常，请重试。</div></div>`;
   }finally{ btn.disabled = false; btn.textContent = "确认核销"; }
 };
-
-loadPending();
 </script>
 </body>
 </html>
