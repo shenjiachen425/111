@@ -1,0 +1,86 @@
+{
+  "emp_login": [
+    200,
+    "{\"token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlbXBsb3llZTAxIiwicm9sZSI6ImVtcGxveWVlIiwibmFtZSI6Ilx1OTVlOFx1NWU5N1x1NTQ1OFx1NWRlNSIsImlhdCI6MTc5MzkzNDk3NiwiZXhwIjoxNzkzOTc4MTc2LCJqdGkiOiIwNzMwODhkNDRmNDQ0NTQ3In0.5d89a29b24fd1bb9eea8e9d20b597e87d307a1c914fc64cbfc9c4babe679a661\",\"role\":\"employee\",\"name\":\"门店员工\"}"
+  ],
+  "mgr_login": [
+    200,
+    "{\"token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYW5hZ2VyMDEiLCJyb2xlIjoibWFuYWdlciIsIm5hbWUiOiJcdThmZDBcdTg0MjVcdTdiYTFcdTc0MDZcdTU0NTgiLCJpYXQiOjE3OTM5MzQ5NzYsImV4cCI6MTc5Mzk3ODE3NiwianRpIjoiYTA3ZjhiMjkxY2YwOGYyOSJ9.64c2155f10e581f71d3fdd9424906f2664eff23996d40364da7701c902005ba9\",\"role\":\"manager\",\"name\":\"运营管理员\"}"
+  ],
+  "chat_man200": [
+    200,
+    "event: token\ndata: {\"delta\": \"满200减3\"}\n\nevent: token\ndata: {\"delta\": \"0券 使用规\"}\n\nevent: token\ndata: {\"delta\": \"则：单笔订单\"}\n\nevent: token\ndata: {\"delta\": \"满 200 \"}\n\nevent: token\ndata: {\"delta\": \"元立减 30\"}\n\nevent: token\ndata: {\"delta\": \" 元，每笔限\"}\n\nevent: token\ndata: {\"delta\": \"用 1 张，\"}\n\nevent: token\ndata: {\"delta\": \"不找零、不兑\"}\n\nevent: token\ndata: {\"delta\": \"现。\"}\n\nevent: meta\ndata: {\"sources\": [\"《会员权益规则手册》第 3.2 条\", \"活动策划审批单 AC-2026-1101\"], \"version\": \"v2026.11\", \"biz_id\": \"BIZ-C786A3AB\", \"escalate\": false, \"reason\": \"\", \"handler\": \"\", \"need_confirm\": \"\", \"kb_meta\": {\"version\": \"v2026.11\", \"updated_at\": \"2026-11-01\", \"owner\": \"运营管理员\", \"stale_days\": 30, \"note\": \"双十一\"}}\n\nevent: done\ndata: {\"finish_reason\": \"stop\"}\n\n"
+  ],
+  "chat_return": [
+    200,
+    "event: token\ndata: {\"delta\": \"兑换券A（赠\"}\n\nevent: token\ndata: {\"delta\": \"品券） 的退\"}\n\nevent: token\ndata: {\"delta\": \"货追回规则当\"}\n\nevent: token\ndata: {\"delta\": \"前未定义，已\"}\n\nevent: token\ndata: {\"delta\": \"转人工处理，\"}\n\nevent: token\ndata: {\"delta\": \"请勿自行承诺\"}\n\nevent: token\ndata: {\"delta\": \"会员。\"}\n\nevent: meta\ndata: {\"sources\": [\"《会员权益规则手册》第 5.1 条\"], \"version\": \"v2026.11\", \"biz_id\": \"BIZ-5AB38883\", \"escalate\": true, \"reason\": \"兑换券退货后已兑换新券的追回规则未定义\", \"handler\": \"活动策划员（唐映秋）/ 数据风控（叶书）\", \"need_confirm\": \"追回规则\", \"kb_meta\": {\"version\": \"v2026.11\", \"updated_at\": \"2026-11-01\", \"owner\": \"运营管理员\", \"stale_days\": 30, \"note\": \"双十一\"}}\n\nevent: done\ndata: {\"finish_reason\": \"stop\"}\n\n"
+  ],
+  "gen_code": [
+    200,
+    "{\"code\":\"721428\",\"biz_id\":\"BIZ-90E1D9DA\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"stores\":\"全门店通用（含线上小程序商城）。\",\"rule_version\":\"v2026.11\"}"
+  ],
+  "redeem_268": [
+    200,
+    "{\"ok\":true,\"biz_id\":\"BIZ-75942D8E\",\"code\":\"721428\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"order_amount\":\"268.00\",\"new_amount\":\"238.00\",\"usable\":true,\"reason\":\"满 200 减 30\",\"exchange\":false,\"rule_version\":\"v2026.11\",\"sources\":\"\\\"[\\\\\\\"《会员权益规则手册》第 3.2 条\\\\\\\", \\\\\\\"活动策划审批单 AC-2026-1101\\\\\\\"]\\\"\",\"escalate\":false}"
+  ],
+  "gen_voucher": [
+    200,
+    "{\"code\":\"357030\",\"biz_id\":\"BIZ-598B7A8B\",\"coupon_name\":\"5元抵用券\",\"coupon_type\":\"抵用\",\"stores\":\"全门店通用。\",\"rule_version\":\"v2026.11\"}"
+  ],
+  "redeem_voucher30": [
+    200,
+    "{\"ok\":true,\"biz_id\":\"BIZ-B484525C\",\"code\":\"357030\",\"coupon_name\":\"5元抵用券\",\"coupon_type\":\"抵用\",\"order_amount\":\"30.00\",\"new_amount\":\"30.00\",\"usable\":false,\"reason\":\"订单未满 50 元，不可用\",\"exchange\":false,\"rule_version\":\"v2026.11\",\"sources\":\"\\\"[\\\\\\\"《会员权益规则手册》第 3.5 条\\\\\\\"]\\\"\",\"escalate\":true}"
+  ],
+  "perm_emp_to_mgr": [
+    401,
+    "{\"code\":401,\"message\":\"未授权\"}"
+  ],
+  "perm_no_token": [
+    401,
+    "{\"code\":401,\"message\":\"未授权\"}"
+  ],
+  "publish_13": [
+    200,
+    "{\"ok\":true,\"meta\":{\"version\":\"v2026.13\",\"updated_at\":\"2026-11-06\",\"owner\":\"运营管理员\",\"stale_days\":30,\"note\":\"可视化测试发版\"},\"coupons\":[{\"id\":\"man200_30\",\"name\":\"满200减30券\",\"type\":\"满减\",\"threshold\":200,\"discount\":30,\"rule\":\"单笔订单满 200 元立减 30 元，每笔限用 1 张，不找零、不兑现。\",\"stores\":\"全门店通用（含线上小程序商城）。\",\"stack\":\"不可与其它满减券叠加，可与会员等级折扣同享（折扣先算，满减后算）。\",\"validity\":\"以券面标注的生效日期与有效期为准。\",\"version\":\"v2026.13\",\"effective_date\":\"2026-11-01\",\"sources\":[\"《会员权益规则手册》第 3.2 条\",\"活动策划审批单 AC-2026-1101\"],\"alias\":[\"满200减30\",\"满200减30券\",\"满200减30的全门店通用券\",\"满减\"]},{\"id\":\"disc85\",\"name\":\"8.5折会员折扣券\",\"type\":\"折扣\",\"rate\":0.85,\"rule\":\"指定商品享 8.5 折，特价品除外；折扣金额四舍五入至分。\",\"stores\":\"线下直营门店可用，电商渠道不参与。\",\"stack\":\"不与满减券叠加计算满减门槛，但可先打折再判断满减。\",\"validity\":\"以券面生效日期为准。\",\"version\":\"v2026.13\",\"effective_date\":\"2026-11-01\",\"sources\":[\"《会员权益规则手册》第 4.1 条\"],\"alias\":[\"8.5折\",\"折扣券\",\"会员折扣券\",\"折扣\"]},{\"id\":\"voucher5\",\"name\":\"5元抵用券\",\"type\":\"抵用\",\"deduct\":5,\"rule\":\"订单满 50 元可用 5 元抵用券，单笔限 1 张。\",\"stores\":\"全门店通用。\",\"stack\":\"不可与满减券同用，可与折扣券叠加。\",\"validity\":\"以券面有效期为准。\",\"version\":\"v2026.13\",\"effective_date\":\"2026-11-01\",\"sources\":[\"《会员权益规则手册》第 3.5 条\"],\"alias\":[\"5元抵用\",\"抵用券\",\"5元抵用券\",\"抵用\"]},{\"id\":\"exchangeA\",\"name\":\"兑换券A（赠品券）\",\"type\":\"兑换\",\"exchange\":true,\"rule\":\"凭券至门店服务台兑换指定赠品一份，不涉及金额抵扣。\",\"stores\":\"全门店服务台。\",\"stack\":\"赠品券不与任何金额类券叠加。\",\"validity\":\"以券面有效期为准。\",\"version\":\"v2026.13\",\"effective_date\":\"2026-11-01\",\"sources\":[\"《会员权益规则手册》第 5.1 条\"],\"alias\":[\"兑换券\",\"兑换券A\",\"赠品券\",\"兑换\",\"赠品\"]}]}"
+  ],
+  "redeem_empty": [
+    400,
+    "{\"code\":400,\"message\":\"码不存在\"}"
+  ],
+  "redeem_zero": [
+    200,
+    "{\"ok\":true,\"biz_id\":\"BIZ-003C766B\",\"code\":\"519576\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"order_amount\":\"0.00\",\"new_amount\":\"0.00\",\"usable\":false,\"reason\":\"订单未满 200 元，不可用\",\"exchange\":false,\"rule_version\":\"v2026.13\",\"sources\":\"\\\"[\\\\\\\"《会员权益规则手册》第 3.2 条\\\\\\\", \\\\\\\"活动策划审批单 AC-2026-1101\\\\\\\"]\\\"\",\"escalate\":true}"
+  ],
+  "gen_unknown": [
+    400,
+    "{\"code\":400,\"message\":\"未知优惠券\"}"
+  ],
+  "chat_badtoken": [
+    401,
+    "{\"code\":401,\"message\":\"未授权\"}"
+  ],
+  "chat_garbage": [
+    200,
+    "event: token\ndata: {\"delta\": \"未能识别您提\"}\n\nevent: token\ndata: {\"delta\": \"到的优惠券，\"}\n\nevent: token\ndata: {\"delta\": \"已转人工核对\"}\n\nevent: token\ndata: {\"delta\": \"，请稍候或由\"}\n\nevent: token\ndata: {\"delta\": \"运营确认券面\"}\n\nevent: token\ndata: {\"delta\": \"信息。\"}\n\nevent: meta\ndata: {\"sources\": [], \"version\": \"\", \"biz_id\": \"BIZ-34D4F297\", \"escalate\": true, \"reason\": \"无法识别优惠券类型\", \"handler\": \"活动策划员（唐映秋）\", \"need_confirm\": \"券类型与活动版本\", \"kb_meta\": {\"version\": \"v2026.13\", \"updated_at\": \"2026-11-06\", \"owner\": \"运营管理员\", \"stale_days\": 30, \"note\": \"可视化测试发版\"}}\n\nevent: done\ndata: {\"finish_reason\": \"stop\"}\n\n"
+  ],
+  "perm_mgr_to_emp": [
+    401,
+    "{\"code\":401,\"message\":\"未授权\"}"
+  ],
+  "login_wrong": [
+    401,
+    "{\"code\":401,\"message\":\"账号或密码或角色错误\"}"
+  ],
+  "redeem_dup_1": [
+    200,
+    "{\"ok\":true,\"biz_id\":\"BIZ-1EA6368D\",\"code\":\"832751\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"order_amount\":\"300.00\",\"new_amount\":\"270.00\",\"usable\":true,\"reason\":\"满 200 减 30\",\"exchange\":false,\"rule_version\":\"v2026.13\",\"sources\":\"\\\"[\\\\\\\"《会员权益规则手册》第 3.2 条\\\\\\\", \\\\\\\"活动策划审批单 AC-2026-1101\\\\\\\"]\\\"\",\"escalate\":false}"
+  ],
+  "redeem_dup_2": [
+    400,
+    "{\"code\":400,\"message\":\"重复核销\"}"
+  ],
+  "audit_after": [
+    200,
+    "{\"redemptions\":[{\"code\":\"519576\",\"coupon_key\":\"man200_30\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"status\":\"used\",\"order_amount\":0.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 11:18:32\",\"redeemed_at\":\"2026-11-06 11:18:32\",\"biz_id\":\"BIZ-B6E5F885\",\"version\":\"v2026.13\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\"},{\"code\":\"832751\",\"coupon_key\":\"man200_30\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"status\":\"used\",\"order_amount\":300.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 11:18:32\",\"redeemed_at\":\"2026-11-06 11:18:32\",\"biz_id\":\"BIZ-C41FBAE4\",\"version\":\"v2026.13\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\"},{\"code\":\"721428\",\"coupon_key\":\"man200_30\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"status\":\"used\",\"order_amount\":268.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 11:16:16\",\"redeemed_at\":\"2026-11-06 11:16:16\",\"biz_id\":\"BIZ-90E1D9DA\",\"version\":\"v2026.11\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\"},{\"code\":\"357030\",\"coupon_key\":\"voucher5\",\"coupon_name\":\"5元抵用券\",\"coupon_type\":\"抵用\",\"status\":\"used\",\"order_amount\":30.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 11:16:16\",\"redeemed_at\":\"2026-11-06 11:16:16\",\"biz_id\":\"BIZ-598B7A8B\",\"version\":\"v2026.11\",\"sources\":\"[\\\"《会员权益规则手册》第 3.5 条\\\"]\"},{\"code\":\"956315\",\"coupon_key\":\"man200_30\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"status\":\"used\",\"order_amount\":268.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 09:58:01\",\"redeemed_at\":\"2026-11-06 09:58:01\",\"biz_id\":\"BIZ-B624CBC6\",\"version\":\"v2026.11\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\"},{\"code\":\"357777\",\"coupon_key\":\"man200_30\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"status\":\"used\",\"order_amount\":268.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 09:54:52\",\"redeemed_at\":\"2026-11-06 09:54:52\",\"biz_id\":\"BIZ-0CD2D739\",\"version\":\"v2026.11\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\"},{\"code\":\"424124\",\"coupon_key\":\"voucher5\",\"coupon_name\":\"5元抵用券\",\"coupon_type\":\"抵用\",\"status\":\"used\",\"order_amount\":30.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 09:54:52\",\"redeemed_at\":\"2026-11-06 09:54:52\",\"biz_id\":\"BIZ-934DE754\",\"version\":\"v2026.11\",\"sources\":\"[\\\"《会员权益规则手册》第 3.5 条\\\"]\"},{\"code\":\"269156\",\"coupon_key\":\"man200_30\",\"coupon_name\":\"满200减30券\",\"coupon_type\":\"满减\",\"status\":\"used\",\"order_amount\":268.0,\"new_amount\":0.0,\"member_name\":\"employee01\",\"created_at\":\"2026-11-06 09:50:30\",\"redeemed_at\":\"2026-11-06 09:50:30\",\"biz_id\":\"BIZ-E2527824\",\"version\":\"v2026.11\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\"}],\"messages\":[{\"id\":20,\"session_id\":\"x\",\"role\":\"bot\",\"content\":\"未能识别您提到的优惠券，已转人工核对，请稍候或由运营确认券面信息。\",\"sources\":\"[]\",\"biz_id\":\"BIZ-34D4F297\",\"escalate\":1,\"created_at\":\"2026-11-06 11:18:32\"},{\"id\":19,\"session_id\":\"x\",\"role\":\"user\",\"content\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 11:18:32\"},{\"id\":18,\"session_id\":\"emp-门店员工\",\"role\":\"bot\",\"content\":\"满200减30券 使用规则：单笔订单满 200 元立减 30 元，每笔限用 1 张，不找零、不兑现。\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\",\"biz_id\":\"BIZ-25BB48E2\",\"escalate\":0,\"created_at\":\"2026-11-06 11:16:17\"},{\"id\":17,\"session_id\":\"emp-门店员工\",\"role\":\"user\",\"content\":\"满200减30怎么用\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 11:16:17\"},{\"id\":16,\"session_id\":\"emp-x\",\"role\":\"bot\",\"content\":\"兑换券A（赠品券） 的退货追回规则当前未定义，已转人工处理，请勿自行承诺会员。\",\"sources\":\"[\\\"《会员权益规则手册》第 5.1 条\\\"]\",\"biz_id\":\"BIZ-5AB38883\",\"escalate\":1,\"created_at\":\"2026-11-06 11:16:16\"},{\"id\":15,\"session_id\":\"emp-x\",\"role\":\"user\",\"content\":\"兑换券A我要退货怎么处理\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 11:16:16\"},{\"id\":14,\"session_id\":\"emp-x\",\"role\":\"bot\",\"content\":\"满200减30券 使用规则：单笔订单满 200 元立减 30 元，每笔限用 1 张，不找零、不兑现。\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\",\"biz_id\":\"BIZ-C786A3AB\",\"escalate\":0,\"created_at\":\"2026-11-06 11:16:16\"},{\"id\":13,\"session_id\":\"emp-x\",\"role\":\"user\",\"content\":\"满200减30怎么用\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 11:16:16\"},{\"id\":12,\"session_id\":\"emp-门店员工\",\"role\":\"bot\",\"content\":\"满200减30券 使用规则：单笔订单满 200 元立减 30 元，每笔限用 1 张，不找零、不兑现。\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\",\"biz_id\":\"BIZ-331F2B57\",\"escalate\":0,\"created_at\":\"2026-11-06 11:13:04\"},{\"id\":11,\"session_id\":\"emp-门店员工\",\"role\":\"user\",\"content\":\"满200减30怎么用\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 11:13:04\"},{\"id\":10,\"session_id\":\"x\",\"role\":\"bot\",\"content\":\"兑换券A（赠品券） 的退货追回规则当前未定义，已转人工处理，请勿自行承诺会员。\",\"sources\":\"[\\\"《会员权益规则手册》第 5.1 条\\\"]\",\"biz_id\":\"BIZ-648973AE\",\"escalate\":1,\"created_at\":\"2026-11-06 09:58:01\"},{\"id\":9,\"session_id\":\"x\",\"role\":\"user\",\"content\":\"兑换券A退货怎么追回？\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 09:58:01\"},{\"id\":8,\"session_id\":\"x\",\"role\":\"bot\",\"content\":\"满200减30券 可用门店：全门店通用（含线上小程序商城）。。\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\",\"biz_id\":\"BIZ-2A534826\",\"escalate\":0,\"created_at\":\"2026-11-06 09:58:01\"},{\"id\":7,\"session_id\":\"x\",\"role\":\"user\",\"content\":\"满200减30券可以在哪些门店使用？\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 09:58:01\"},{\"id\":6,\"session_id\":\"x\",\"role\":\"bot\",\"content\":\"兑换券A（赠品券） 的退货追回规则当前未定义，已转人工处理，请勿自行承诺会员。\",\"sources\":\"[\\\"《会员权益规则手册》第 5.1 条\\\"]\",\"biz_id\":\"BIZ-44A385D7\",\"escalate\":1,\"created_at\":\"2026-11-06 09:54:52\"},{\"id\":5,\"session_id\":\"x\",\"role\":\"user\",\"content\":\"兑换券A退货怎么追回？\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 09:54:52\"},{\"id\":4,\"session_id\":\"x\",\"role\":\"bot\",\"content\":\"满200减30券 可用门店：全门店通用（含线上小程序商城）。。\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\",\"biz_id\":\"BIZ-DCAAEBB2\",\"escalate\":0,\"created_at\":\"2026-11-06 09:54:52\"},{\"id\":3,\"session_id\":\"x\",\"role\":\"user\",\"content\":\"满200减30券可以在哪些门店使用？\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 09:54:52\"},{\"id\":2,\"session_id\":\"d1\",\"role\":\"bot\",\"content\":\"满200减30券 可用门店：全门店通用（含线上小程序商城）。。\",\"sources\":\"[\\\"《会员权益规则手册》第 3.2 条\\\", \\\"活动策划审批单 AC-2026-1101\\\"]\",\"biz_id\":\"BIZ-8711A2B3\",\"escalate\":0,\"created_at\":\"2026-11-06 09:50:30\"},{\"id\":1,\"session_id\":\"d1\",\"role\":\"user\",\"content\":\"满200减30券可以在哪些门店使用？\",\"sources\":\"[]\",\"biz_id\":\"\",\"escalate\":0,\"created_at\":\"2026-11-06 09:50:30\"}]}"
+  ]
+}
