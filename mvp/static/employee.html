@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>员工端 · 会员权益智能体</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Microsoft YaHei", system-ui, sans-serif; background:#eef1f6; color:#1f2a44; }
+  header { background: linear-gradient(90deg,#2d3e63,#3f5a96); color:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:17px; margin:0; }
+  .wrap { max-width: 920px; margin: 16px auto; padding: 0 14px; }
+  .card { background:#fff; border-radius:12px; padding:16px; margin-bottom:14px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+  .card h2 { font-size:14px; margin:0 0 10px; color:#2d3e63; }
+  label { font-size:12px; color:#6b7794; display:block; margin:8px 0 4px; }
+  input, textarea, select, button { font-family:inherit; font-size:13px; }
+  input, textarea, select { width:100%; padding:9px 10px; border:1px solid #d4dbe8; border-radius:8px; }
+  button { background:#2d3e63; color:#fff; border:none; border-radius:8px; padding:9px 16px; cursor:pointer; margin-top:8px; }
+  button.alt { background:#ff6b35; }
+  button.ghost { background:#eef1f6; color:#2d3e63; }
+  .row { display:flex; gap:10px; }
+  .row > div { flex:1; }
+  #chatbox { height:240px; overflow:auto; border:1px solid #e3e8f2; border-radius:8px; padding:10px; background:#f8fafc; font-size:13px; }
+  .msg { margin:6px 0; }
+  .msg.user { text-align:right; }
+  .msg .b { display:inline-block; padding:6px 10px; border-radius:8px; max-width:80%; }
+  .msg.user .b { background:#2d3e63; color:#fff; }
+  .msg.bot .b { background:#eaf0ff; color:#1f2a44; text-align:left; }
+  .meta { font-size:11px; color:#9aa6c4; margin-top:4px; }
+  .esc { background:#fff4ef; border:1px solid #ffd2bf; color:#c0392b; padding:6px 8px; border-radius:8px; font-size:12px; margin-top:6px; }
+  .disclaimer { font-size:11px; color:#9aa6c4; border-top:1px dashed #cdd6e6; padding-top:8px; margin-top:10px; }
+  .hidden { display:none; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .tabs button { background:#dde3ef; color:#2d3e63; }
+  .tabs button.active { background:#2d3e63; color:#fff; }
+  .pill { display:inline-block; background:#eaf0ff; color:#2d3e63; border-radius:20px; padding:2px 10px; font-size:11px; margin:2px; }
+  .ok { color:#1e8e3e; } .bad { color:#c0392b; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { border:1px solid #e3e8f2; padding:6px 8px; text-align:left; }
+  th { background:#f1f4fa; }
+</style>
+</head>
+<body>
+<header>
+  <h1>员工端 · 会员权益智能体（MVP）</h1>
+  <div id="who"></div>
+</header>
+
+<div class="wrap" id="login" >
+  <div class="card">
+    <h2>员工登录</h2>
+    <div class="row">
+      <div><label>账号</label><input id="u" value="employee01"></div>
+      <div><label>密码</label><input id="p" type="password" value="Employee@123456"></div>
+    </div>
+    <button onclick="doLogin()">登录员工端</button>
+    <div class="disclaimer">演示账号：employee01 / Employee@123456（角色：员工端：收银/客服/店员）</div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="main">
+  <div class="tabs">
+    <button class="active" data-t="q" onclick="switchTab(this)">权益查询助手</button>
+    <button data-t="r" onclick="switchTab(this)">核销</button>
+    <button data-t="g" onclick="switchTab(this)">代生成核销码</button>
+    <button data-t="e" onclick="switchTab(this);loadEsc()">待处理转人工</button>
+  </div>
+
+  <div class="card" id="tab-q">
+    <h2>权益查询助手（替会员问 / 自己查）</h2>
+    <div id="chatbox"></div>
+    <label>输入问题（如：满200减30券可在哪些门店使用？）</label>
+    <textarea id="q" rows="2"></textarea>
+    <button onclick="ask()">发送</button>
+    <div class="disclaimer">本结果为辅助信息，最终以门店/运营口径为准 · 答案附事实引用与资料版本</div>
+  </div>
+
+  <div class="card hidden" id="tab-r">
+    <h2>核销（收银）</h2>
+    <div class="row">
+      <div><label>会员端核销码（6位数字）</label><input id="rcode" placeholder="如 123456"></div>
+      <div><label>订单当前金额（元）</label><input id="ramt" type="number" placeholder="如 268"></div>
+    </div>
+    <button class="alt" onclick="redeem()">确认核销</button>
+    <div id="rresult"></div>
+  </div>
+
+  <div class="card hidden" id="tab-g">
+    <h2>为会员生成核销码（柜台协助）</h2>
+    <label>选择券</label>
+    <select id="gcoupon"></select>
+    <button onclick="genCode()">生成核销码</button>
+    <div id="gresult"></div>
+  </div>
+
+  <div class="card hidden" id="tab-e">
+    <h2>待处理转人工</h2>
+    <div id="elist"></div>
+  </div>
+</div>
+
+<script>
+let TOKEN="", USER="";
+function doLogin(){
+  const u=document.getElementById("u").value, p=document.getElementById("p").value;
+  fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({username:u,password:p,role:"employee"})})
+  .then(r=>r.json().then(j=>({s:r.status,j}))).then(({s,j})=>{
+    if(s!==200){ alert("登录失败："+j.message); return; }
+    TOKEN=j.token; USER=j.name;
+    document.getElementById("login").classList.add("hidden");
+    document.getElementById("main").classList.remove("hidden");
+    document.getElementById("who").textContent="👤 "+USER;
+    loadCoupons();
+  });
+}
+function authH(){ return {"Content-Type":"application/json","X-Token":TOKEN}; }
+function switchTab(btn){
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  ["q","r","g","e"].forEach(t=>document.getElementById("tab-"+t).classList.add("hidden"));
+  document.getElementById("tab-"+btn.dataset.t).classList.remove("hidden");
+}
+function addMsg(role,text){
+  const box=document.getElementById("chatbox");
+  const d=document.createElement("div"); d.className="msg "+role;
+  d.innerHTML='<span class="b">'+text.replace(/\n/g,"<br>")+'</span>';
+  box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+async function ask(){
+  const q=document.getElementById("q").value.trim(); if(!q) return;
+  addMsg("user",q); document.getElementById("q").value="";
+  const bot=document.createElement("div"); bot.className="msg bot";
+  bot.innerHTML='<span class="b"></span>'; document.getElementById("chatbox").appendChild(bot);
+  const span=bot.querySelector(".b");
+  const res=await fetch("/api/employee/chat",{method:"POST",headers:authH(),
+    body:JSON.stringify({session_id:"emp-"+(USER||"x"),question:q,token:TOKEN})});
+  const reader=res.body.getReader(), dec=new TextDecoder(); let buf="",ev="",da="",meta=null;
+  while(true){
+    const {done,value}=await reader.read(); if(done) break;
+    buf+=dec.decode(value,{stream:true});
+    for(const part of buf.split("\n\n")){
+      for(const line of part.split("\n")){
+        if(line.startsWith("event:")) ev=line.slice(6).trim();
+        else if(line.startsWith("data:")) da=line.slice(5).trim();
+      }
+      if(ev&&da){
+        try{ const o=JSON.parse(da);
+          if(ev==="token") span.textContent+=o.delta;
+          else if(ev==="meta") meta=o;
+        }catch(e){}
+        ev=""; da="";
+      }
+    }
+  }
+  const box=document.getElementById("chatbox");
+  if(meta){
+    let m='<div class="meta">业务编号 '+meta.biz_id+' · 资料版本 '+meta.version;
+    if(meta.sources&&meta.sources.length) m+=' · 引用：'+meta.sources.map(s=>'《'+s+'》').join("、");
+    m+='</div>';
+    if(meta.escalate) m+='<div class="esc">⚠️ 已转人工：'+meta.reason+' · 接手人 '+meta.handler+' · 待确认：'+meta.need_confirm+'</div>';
+    const mm=document.createElement("div"); mm.innerHTML=m; box.appendChild(mm);
+  }
+  box.scrollTop=box.scrollHeight;
+}
+async function loadCoupons(){
+  const r=await fetch("/api/manager/kb",{headers:authH()}); const j=await r.json();
+  const sel=document.getElementById("gcoupon"); sel.innerHTML="";
+  j.coupons.forEach(c=>{ const o=document.createElement("option"); o.value=c.id; o.textContent=c.name+"（"+c.type+"）"; sel.appendChild(o); });
+}
+async function genCode(){
+  const key=document.getElementById("gcoupon").value;
+  const r=await fetch("/api/employee/generate_code",{method:"POST",headers:authH(),body:JSON.stringify({coupon_key:key,token:TOKEN})});
+  const j=await r.json();
+  document.getElementById("gresult").innerHTML=
+    '<div class="card" style="margin:0"><b>核销码：</b><span class="pill" style="font-size:16px;color:#ff6b35">'+j.code+'</span><br>'+
+    '券：'+j.coupon_name+'（'+j.coupon_type+'）<br>可用门店：'+j.stores+'<br>业务编号：'+j.biz_id+' · 版本：'+j.rule_version+'</div>';
+}
+async function redeem(){
+  const code=document.getElementById("rcode").value.trim();
+  const amt=parseFloat(document.getElementById("ramt").value);
+  const r=await fetch("/api/employee/redeem",{method:"POST",headers:authH(),body:JSON.stringify({code,order_amount:amt,token:TOKEN})});
+  const j=await r.json();
+  let h="";
+  if(j.ok){
+    h='<div class="card" style="margin:0">'+
+      '<div class="'+(j.usable?'ok':'bad')+'">'+(j.usable?'✅ 核销成功':'❌ 不可用')+(j.exchange?'（赠品券）':'')+'</div>'+
+      (j.new_amount!=null?'<div style="font-size:20px;margin:6px 0">应付 <b>¥'+j.new_amount+'</b> <span style="color:#9aa6c4;text-decoration:line-through">¥'+j.order_amount+'</span></div>':'')+
+      '<div class="meta">券：'+j.coupon_name+'（'+j.coupon_type+'）<br>核销码：'+j.code+'<br>依据版本：'+j.rule_version+'<br>业务编号：'+j.biz_id+'<br>说明：'+j.reason+'</div></div>';
+    if(!j.usable) h+='<div class="esc">⚠️ 不可用已转人工，请勿自行承诺会员。</div>';
+  } else { h='<div class="esc">'+j.message+'</div>'; }
+  document.getElementById("rresult").innerHTML=h;
+}
+async function loadEsc(){
+  const r=await fetch("/api/employee/escalations",{headers:authH()}); const j=await r.json();
+  const box=document.getElementById("elist");
+  if(!j.length){ box.innerHTML='<div class="meta">暂无待处理转人工事项。</div>'; return; }
+  let h='<table><tr><th>业务编号</th><th>触发原因</th><th>接手人</th><th>待确认</th><th>时间</th></tr>';
+  j.forEach(e=>{ h+='<tr><td>'+e.biz_id+'</td><td>'+e.reason+'</td><td>'+e.handler+'</td><td>'+e.need_confirm+'</td><td>'+e.created_at+'</td></tr>'; });
+  h+='</table>'; box.innerHTML=h;
+}
+</script>
+</body>
+</html>

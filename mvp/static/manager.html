@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理端 · 会员权益智能体</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Microsoft YaHei",system-ui,sans-serif; background:#eef1f6; color:#1f2a44; }
+  header { background:linear-gradient(90deg,#1f3a2e,#2d6a4f); color:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:17px; margin:0; }
+  .wrap { max-width:1100px; margin:16px auto; padding:0 14px; }
+  .card { background:#fff; border-radius:12px; padding:16px; margin-bottom:14px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+  .card h2 { font-size:14px; margin:0 0 10px; color:#1f3a2e; }
+  label { font-size:12px; color:#6b7794; display:block; margin:8px 0 4px; }
+  input,textarea,select,button { font-family:inherit; font-size:13px; }
+  input,textarea,select { width:100%; padding:8px 10px; border:1px solid #d4dbe8; border-radius:8px; }
+  button { background:#1f3a2e; color:#fff; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; margin-top:8px; }
+  button.alt { background:#ff6b35; } button.ghost { background:#eef1f6; color:#1f3a2e; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .stat { background:#f1f8f4; border:1px solid #cfe8dc; border-radius:10px; padding:12px; text-align:center; }
+  .stat b { display:block; font-size:22px; color:#1f3a2e; }
+  .stat span { font-size:11px; color:#6b7794; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { border:1px solid #e3e8f2; padding:6px 8px; text-align:left; }
+  th { background:#f1f4fa; }
+  .hidden { display:none; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .tabs button { background:#dde3ef; color:#1f3a2e; }
+  .tabs button.active { background:#1f3a2e; color:#fff; }
+  .pill { background:#eaf0ff; color:#2d3e63; border-radius:20px; padding:2px 10px; font-size:11px; margin:2px; }
+  .esc { background:#fff4ef; border:1px solid #ffd2bf; color:#c0392b; padding:6px; border-radius:8px; font-size:12px; }
+  .disclaimer { font-size:11px; color:#9aa6c4; margin-top:8px; }
+</style>
+</head>
+<body>
+<header><h1>管理端 · 会员权益智能体（MVP）</h1><div id="who"></div></header>
+
+<div class="wrap" id="login">
+  <div class="card">
+    <h2>管理员登录</h2>
+    <div class="row" style="display:flex;gap:10px">
+      <div style="flex:1"><label>账号</label><input id="u" value="manager01"></div>
+      <div style="flex:1"><label>密码</label><input id="p" type="password" value="Manager@123456"></div>
+    </div>
+    <button onclick="doLogin()">登录管理端</button>
+    <div class="disclaimer">演示账号：manager01 / Manager@123456（角色：管理端：运营/策划/数据/管理层）</div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="main">
+  <div class="tabs">
+    <button class="active" data-t="o" onclick="switchTab(this);loadOverview()">概览</button>
+    <button data-t="k" onclick="switchTab(this);loadKB()">知识库管理</button>
+    <button data-t="a" onclick="switchTab(this);loadAudit()">审计看板</button>
+    <button data-t="e" onclick="switchTab(this);loadEsc()">转人工处理台</button>
+  </div>
+
+  <div class="card" id="tab-o">
+    <h2>系统概览</h2>
+    <div class="grid" id="stats"></div>
+  </div>
+
+  <div class="card hidden" id="tab-k">
+    <h2>知识库管理（单一口径出口 · 版本化）</h2>
+    <div id="kbmeta" class="meta"></div>
+    <div id="kblist"></div>
+    <hr>
+    <h2>编辑 / 新增券规则</h2>
+    <label>券ID</label><input id="c_id" placeholder="如 man200_30">
+    <label>名称</label><input id="c_name">
+    <label>类型（满减/折扣/抵用/兑换）</label><input id="c_type">
+    <label>规则</label><textarea id="c_rule" rows="2"></textarea>
+    <label>可用门店</label><input id="c_stores">
+    <label>叠加规则</label><input id="c_stack">
+    <label>有效期说明</label><input id="c_validity">
+    <button onclick="saveCoupon()">保存（待发版）</button>
+    <h2 style="margin-top:14px">发版</h2>
+    <div class="row" style="display:flex;gap:10px">
+      <div style="flex:1"><label>新版本号</label><input id="v_num" value="v2026.12"></div>
+      <div style="flex:2"><label>发版说明</label><input id="v_note" placeholder="如 双十一活动更新"></div>
+    </div>
+    <button class="alt" onclick="publish()">发布新版本</button>
+    <div class="disclaimer">保存仅入库，需「发布新版本」后答案口径才随版本号更新（保证可追溯）。</div>
+  </div>
+
+  <div class="card hidden" id="tab-a">
+    <h2>审计看板（业务编号可追溯）</h2>
+    <h3 style="font-size:13px">最近核销</h3><div id="aud_r"></div>
+    <h3 style="font-size:13px">最近问答</h3><div id="aud_m"></div>
+  </div>
+
+  <div class="card hidden" id="tab-e">
+    <h2>转人工处理台</h2>
+    <div id="elist"></div>
+  </div>
+</div>
+
+<script>
+let TOKEN="", USER="";
+function doLogin(){
+  const u=document.getElementById("u").value, p=document.getElementById("p").value;
+  fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({username:u,password:p,role:"manager"})})
+  .then(r=>r.json().then(j=>({s:r.status,j}))).then(({s,j})=>{
+    if(s!==200){ alert("登录失败："+j.message); return; }
+    TOKEN=j.token; USER=j.name;
+    document.getElementById("login").classList.add("hidden");
+    document.getElementById("main").classList.remove("hidden");
+    document.getElementById("who").textContent="👤 "+USER;
+    loadOverview();
+  });
+}
+function authH(){ return {"Content-Type":"application/json","X-Token":TOKEN}; }
+function switchTab(btn){
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  ["o","k","a","e"].forEach(t=>document.getElementById("tab-"+t).classList.add("hidden"));
+  document.getElementById("tab-"+btn.dataset.t).classList.remove("hidden");
+}
+async function loadOverview(){
+  const r=await fetch("/api/manager/overview",{headers:authH()}); const j=await r.json();
+  document.getElementById("stats").innerHTML=
+    stat(j.kb_version,"当前知识库版本")+stat(j.coupon_count,"券规则条数")+
+    stat(j.redemption_total,"核销总笔数")+stat(j.redemption_used,"已核销")+
+    stat(j.escalation_total,"转人工总数")+stat(j.escalation_open,"待处理转人工");
+}
+function stat(v,l){ return '<div class="stat"><b>'+v+'</b><span>'+l+'</span></div>'; }
+async function loadKB(){
+  const r=await fetch("/api/manager/kb",{headers:authH()}); const j=await r.json();
+  const m=j.meta;
+  document.getElementById("kbmeta").innerHTML='当前版本 <span class="pill">'+m.version+'</span> 更新于 '+m.updated_at+' · 责任方 '+m.owner+' · 过期阈值 '+m.stale_days+' 天 · 备注：'+m.note;
+  let h='<table><tr><th>ID</th><th>名称</th><th>类型</th><th>规则</th><th>门店</th><th>版本</th></tr>';
+  j.coupons.forEach(c=>{ h+='<tr><td>'+c.id+'</td><td>'+c.name+'</td><td>'+c.type+'</td><td>'+c.rule+'</td><td>'+c.stores+'</td><td>'+c.version+'</td></tr>'; });
+  h+='</table>'; document.getElementById("kblist").innerHTML=h;
+}
+async function saveCoupon(){
+  const c={ id:document.getElementById("c_id").value, name:document.getElementById("c_name").value,
+    type:document.getElementById("c_type").value, rule:document.getElementById("c_rule").value,
+    stores:document.getElementById("c_stores").value, stack:document.getElementById("c_stack").value,
+    validity:document.getElementById("c_validity").value, alias:[document.getElementById("c_name").value] };
+  if(!c.id||!c.name){ alert("ID 与名称必填"); return; }
+  const r=await fetch("/api/manager/kb/upsert",{method:"POST",headers:authH(),body:JSON.stringify(c)});
+  const j=await r.json(); if(j.ok){ alert("已保存（待发版）"); loadKB(); } else alert(j.message);
+}
+async function publish(){
+  const r=await fetch("/api/manager/kb/publish",{method:"POST",headers:authH(),
+    body:JSON.stringify({version:document.getElementById("v_num").value,note:document.getElementById("v_note").value})});
+  const j=await r.json(); if(j.ok){ alert("已发版："+j.meta.version); loadKB(); } else alert(j.message);
+}
+async function loadAudit(){
+  const r=await fetch("/api/manager/audit",{headers:authH()}); const j=await r.json();
+  let h='<table><tr><th>核销码</th><th>券</th><th>状态</th><th>订单</th><th>应付</th><th>版本</th><th>业务编号</th><th>时间</th></tr>';
+  j.redemptions.forEach(x=>{ h+='<tr><td>'+x.code+'</td><td>'+x.coupon_name+'</td><td>'+x.status+'</td><td>'+(x.order_amount||'-')+'</td><td>'+(x.new_amount||'-')+'</td><td>'+x.version+'</td><td>'+x.biz_id+'</td><td>'+x.created_at+'</td></tr>'; });
+  h+='</table>'; document.getElementById("aud_r").innerHTML=h;
+  let m='<table><tr><th>角色</th><th>内容</th><th>业务编号</th><th>转人工</th><th>时间</th></tr>';
+  j.messages.forEach(x=>{ m+='<tr><td>'+x.role+'</td><td>'+x.content+'</td><td>'+x.biz_id+'</td><td>'+(x.escalate?'是':'否')+'</td><td>'+x.created_at+'</td></tr>'; });
+  m+='</table>'; document.getElementById("aud_m").innerHTML=m;
+}
+async function loadEsc(){
+  const r=await fetch("/api/manager/escalations",{headers:authH()}); const j=await r.json();
+  if(!j.length){ document.getElementById("elist").innerHTML='<div class="meta">暂无转人工事项。</div>'; return; }
+  let h='<table><tr><th>业务编号</th><th>原因</th><th>接手人</th><th>待确认</th><th>状态</th><th>原问题</th><th>操作</th></tr>';
+  j.forEach(e=>{ h+='<tr><td>'+e.biz_id+'</td><td>'+e.reason+'</td><td>'+e.handler+'</td><td>'+e.need_confirm+'</td><td>'+(e.status=='open'?'<span style="color:#c0392b">待处理</span>':'<span style="color:#1e8e3e">已解决</span>')+'</td><td>'+e.input_text+'</td><td>'+(e.status=='open'?'<button class="ghost" onclick="resolve('+e.id+')">标记已处理</button>':'✅ '+e.assignee)+'</td></tr>'; });
+  h+='</table>'; document.getElementById("elist").innerHTML=h;
+}
+async function resolve(id){
+  const r=await fetch("/api/manager/escalations/resolve",{method:"POST",headers:authH(),body:JSON.stringify({id})});
+  const j=await r.json(); if(j.ok){ loadEsc(); }
+}
+</script>
+</body>
+</html>
